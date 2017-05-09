@@ -27,6 +27,10 @@
         <generate_applet_bin_std PACKAGENAMEUNPACKAGED="ePurse" APPLETNAME="Epurse"/>
     </target>
 
+    <target name="install" depends="binarize.all.standard">
+        <install_applet PACKAGENAMEUNPACKAGED="ePurse" APPLETNAME="Epurse"/>
+    </target>
+
     <!-- ======================================================== -->
     <!-- Configuration section ends. Do not edit below this line -->
     <!-- ======================================================== -->
@@ -186,92 +190,15 @@
         </sequential>
     </macrodef>
 
-    <macrodef name="generate_library_bin_egate" description="Generating binary file for egate card">
-        <attribute name="MODULENAME"/>
+    <macrodef name="install_applet">
         <attribute name="PACKAGENAMEUNPACKAGED"/>
+        <attribute name="APPLETNAME"/>
         <sequential>
-            <java jar="${JC_HOME}/lib/captransf.jar" fork="true" failonerror="true" description="Transforming cap file">
-                <arg value="-noint"/>
-                <arg value="-s"/>
-                <arg value="${OUTPUT_DIR}"/>
-                <arg value="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{MODULENAME}.cap"/>
-                <classpath>
-                    <pathelement location="."/>
-                    <pathelement path="${java.class.path}"/>
-                </classpath>
+            <java jar="${GP_HOME}/gp.jar" fork="true" failonerror="true">
+                <arg line="-install ${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}.cap"/>
             </java>
-
-            <unjar src="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{MODULENAME}.cap.transf"
-                   dest="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard"/>
-            <concat binary="true"
-                    destfile="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{MODULENAME}.ijc">
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Header.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Directory.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Import.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Class.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Method.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/StaticField.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Export.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/ConstantPool.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/RefLocation.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Descriptor.cap"/>
-            </concat>
         </sequential>
     </macrodef>
-
-    <macrodef name="generate_applet_bin_egate" description="Generating binary file for egate card">
-        <attribute name="MODULENAME"/>
-        <attribute name="PACKAGENAMEUNPACKAGED"/>
-        <sequential>
-            <java jar="${JC_HOME}/lib/captransf.jar" fork="true" failonerror="true" description="Transforming cap file">
-                <arg value="-noint"/>
-                <arg value="-s"/>
-                <arg value="${OUTPUT_DIR}"/>
-                <arg value="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{MODULENAME}.cap"/>
-                <classpath>
-                    <pathelement location="."/>
-                    <pathelement path="${java.class.path}"/>
-                </classpath>
-            </java>
-
-            <unjar src="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{MODULENAME}.cap.transf"
-                   dest="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard"/>
-            <concat binary="yes"
-                    destfile="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{MODULENAME}.ijc">
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Header.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Directory.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Import.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Applet.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Class.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Method.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/StaticField.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/ConstantPool.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/RefLocation.cap"/>
-                <fileset
-                        file="${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}/javacard/Descriptor.cap"/>
-            </concat>
-        </sequential>
-    </macrodef>
-
 
     <target description="Cleans up generated files" name="clean.all">
         <mkdir dir="${OUTPUT_DIR}"/>
