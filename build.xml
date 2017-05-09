@@ -27,11 +27,11 @@
                     ADDEXPFILES="${OUTPUT_DIR}/Epurse/javacard/Epurse.exp"/>
     </target>
 
-    <target name="binarize.all.standard" depends="verifycap.all">
+    <target name="binarize.all" depends="verifycap.all">
         <generate_applet_bin_std PACKAGENAMEUNPACKAGED="ePurse" APPLETNAME="Epurse"/>
     </target>
 
-    <target name="install" depends="binarize.all.standard">
+    <target name="install" depends="binarize.all">
         <install_applet PACKAGENAMEUNPACKAGED="ePurse" APPLETNAME="Epurse"/>
     </target>
 
