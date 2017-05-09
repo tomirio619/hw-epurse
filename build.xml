@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project basedir="." name="FractalizeRs applet building">
 
+    <property environment="env"/>
+    <fail unless="env.JAVA_HOME" message="JAVA_HOME not set."/>
+    <echo message="JAVA_HOME is set to = ${env.JAVA_HOME}"/>
+
     <!-- Edit the Common.properties file to setup vital constants-->
     <property file="Common.properties"/>
 
