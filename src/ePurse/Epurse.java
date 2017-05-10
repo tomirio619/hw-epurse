@@ -1,12 +1,6 @@
 package ePurse;
 
-import javacard.framework.APDU;
-import javacard.framework.Applet;
-import javacard.framework.ISO7816;
-import javacard.framework.ISOException;
-import javacard.security.RSAPrivateKey;
-import javacard.security.RSAPublicKey;
-import javacardx.crypto.*;
+import javacard.framework.*;
 
 
 /**
@@ -33,9 +27,16 @@ public class Epurse extends Applet implements ISO7816 {
     private final static byte VERIFICATION_HI = (byte) 0x41;
     private final static byte VERIFICATION_V = (byte) 0x42;
 
+    private final static byte SELECT = (byte) 0xA4;
+
     private final static short UNKNOWN_INSTRUCTION_ERROR = (short) 1;
 
+    private final byte[] tmp;
+    private final byte[] appletAID;
+
     public Epurse() {
+        tmp = new byte[128];
+        appletAID = new byte[8];
         register();
     }
 
@@ -47,10 +48,41 @@ public class Epurse extends Applet implements ISO7816 {
      * @noinspection UnusedDeclaration
      */
     public void process(APDU apdu) {
+        AID aid = JCSystem.getAID();
         byte[] buffer = apdu.getBuffer();
-        byte ins = buffer[OFFSET_INS];
-        switch (ins){
+        // Store AID in appletAID byte array
+        aid.getBytes(appletAID, (short) 0);
+        byte cla = buffer[OFFSET_CLA];  // Class byte
+        byte ins = buffer[OFFSET_INS];  // Instruction byte
+        switch (ins) {
             //Verification APDUs:
+            case SELECT:
+                // Check whether the API send to us matches this Applet's AID
+                short readCount = apdu.setIncomingAndReceive();
+//                System.out.println("Readcount: " + readCount);
+                Util.arrayCopy(buffer, OFFSET_CDATA, tmp, (short) 0, readCount);
+//                System.out.println("Received AID:\t" + DatatypeConverter.printHexBinary(tmp));
+//                System.out.println("Applet AID: \t" + DatatypeConverter.printHexBinary(appletAID));
+//                System.out.println("APDU: " + DatatypeConverter.printHexBinary(buffer));
+                if (Util.arrayCompare(tmp, (short) 0, appletAID, (short) 0, (short) appletAID.length) == (byte) 0) {
+                    // SELECT succeeded
+//                    System.out.println("Success!");
+                    short le = apdu.setOutgoing();
+                    if (le < (short) 2) {
+                        ISOException.throwIt(SW_WRONG_LENGTH);
+                        return;
+                    }
+                    apdu.setOutgoingLength((short) 3);
+                    // build response data in apdu.buffer[ 0.. outCount-1 ];
+                    buffer[0] = (byte) 1;
+                    buffer[1] = (byte) 2;
+                    buffer[3] = (byte) 3;
+                    apdu.sendBytes((short) 0, (short) 3);
+                    // return good complete status 90 00
+                } else {
+                    ISOException.throwIt(SW_APPLET_SELECT_FAILED);
+                }
+                break;
             case VERIFICATION_HI:
                 //TODO:
             case VERIFICATION_V:
@@ -90,4 +122,5 @@ public class Epurse extends Applet implements ISO7816 {
                 throw new ISOException(UNKNOWN_INSTRUCTION_ERROR);
         }
     }
+
 }
