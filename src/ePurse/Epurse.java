@@ -1,8 +1,10 @@
 package ePurse;
 
+import com.licel.jcardsim.crypto.ECPrivateKeyImpl;
 import javacard.framework.*;
 import javacard.security.KeyBuilder;
 import javacard.security.KeyPair;
+import javacard.security.PrivateKey;
 import javacard.security.Signature;
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
 import org.bouncycastle.crypto.util.PrivateKeyInfoFactory;
@@ -10,8 +12,12 @@ import org.bouncycastle.util.encoders.Hex;
 
 import javax.crypto.spec.SecretKeySpec;
 import javax.xml.bind.DatatypeConverter;
+import java.security.KeyFactory;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
 import java.security.PublicKey;
 import java.security.interfaces.ECPrivateKey;
+import java.security.spec.PKCS8EncodedKeySpec;
 
 
 /**
@@ -46,12 +52,13 @@ public class Epurse extends Applet implements ISO7816 {
 
     private byte[] transientBuffer;
 
-    private KeyPair keypair;
+    private javacard.security.ECPrivateKey privateKey;
     private Signature signature;
 
     public Epurse() {
         transientBuffer = JCSystem.makeTransientByteArray((short) 256, JCSystem.CLEAR_ON_RESET);
-        javacard.security.ECPrivateKey privateKey = ECPrivateKey.setS();
+        privateKey = (javacard.security.ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE, KeyBuilder.LENGTH_EC_FP_192, false);
+        signature = Signature.getInstance(Signature.ALG_ECDSA_SHA, false);
         register();
     }
 
@@ -104,8 +111,24 @@ public class Epurse extends Applet implements ISO7816 {
         byte ins = buffer[OFFSET_INS];  // Instruction byte
 
         switch (ins) {
-            //Verification APDUs:
-            case VERIFICATION_HI:
+            //Init phase:
+            case KEYPAIR_PRIVATE: {
+                //Todo: check whether the state allows for personalisation
+
+                short datalength = (short) buffer[OFFSET_LC];
+                Util.arrayCopy(buffer, OFFSET_CDATA, transientBuffer, (short) 0, datalength);
+                privateKey.setS(transientBuffer, (short) 0, datalength);
+                signature.init(privateKey, Signature.MODE_SIGN);
+                transientBuffer[0] = (byte) 42;
+                short length = signature.sign(transientBuffer, (short) 0, (short) 1, transientBuffer, (short) 1);
+                apdu.setOutgoing();
+                apdu.setOutgoingLength((short) (1 + length));
+                apdu.sendBytesLong(transientBuffer, (short) 0, (short) (1 + length));
+
+                //Todo: mark in the state that the card does not accept any new keys
+                break;
+                //Verification APDUs:
+            } case VERIFICATION_HI:
                 //Increment the received number
                 short datalength = (short) buffer[OFFSET_LC];
                 Util.arrayCopy(buffer, OFFSET_CDATA, transientBuffer, (short) 0, datalength);
@@ -113,7 +136,7 @@ public class Epurse extends Applet implements ISO7816 {
 
                 //Sign the response
                 transientBuffer[2] = (byte) 42;
-                signature.init(keypair.getPrivate(), Signature.MODE_SIGN);
+//                signature.init(keypair.getPrivate(), Signature.MODE_SIGN);
                 short signatureSize = signature.sign(transientBuffer, (short) 0, (short) 3, transientBuffer, (short) 4);
 
                 //Send the response

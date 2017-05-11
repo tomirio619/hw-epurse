@@ -1,5 +1,7 @@
 import javacard.framework.ISO7816;
 import javacard.framework.Util;
+import javacard.security.KeyBuilder;
+import javacard.security.KeyPair;
 import org.bouncycastle.util.encoders.Hex;
 
 import javax.smartcardio.*;

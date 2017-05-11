@@ -6,21 +6,20 @@ import javacard.framework.CardException;
 import javacard.framework.ISO7816;
 import javacard.framework.Util;
 import javacard.security.*;
-import jdk.nashorn.internal.ir.Terminal;
+import javacard.security.ECPrivateKey;
+import javacard.security.ECPublicKey;
+import javacard.security.KeyPair;
 import junit.framework.TestCase;
-import org.bouncycastle.jce.interfaces.ECPrivateKey;
-import org.bouncycastle.jce.interfaces.ECPublicKey;
 import org.bouncycastle.util.encoders.Hex;
-import org.junit.Before;
 import org.junit.BeforeClass;
 
 import javax.smartcardio.*;
 import javax.xml.bind.DatatypeConverter;
 import java.security.*;
-import java.security.KeyPair;
+import java.security.Signature;
+import java.security.interfaces.*;
 import java.security.spec.ECGenParameterSpec;
 import java.util.List;
-import java.util.Random;
 
 /**
  * Created by Tomirio on 10-5-2017.
@@ -108,17 +107,37 @@ public class Simulator extends TestCase {
         setUpIsDone = true;
     }
 
-    public void testSendKeyPair() throws NoSuchProviderException, NoSuchAlgorithmException, InvalidAlgorithmParameterException {
+    public void testSendKeyPair() throws NoSuchProviderException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, SignatureException {
+        //First generate a signing keypair
         ECGenParameterSpec ecGenParameterSpec = new ECGenParameterSpec("prime192v1");
         KeyPairGenerator g = KeyPairGenerator.getInstance("ECDSA", "BC");
         g.initialize(ecGenParameterSpec, new SecureRandom());
-        KeyPair pair = g.genKeyPair();
+        java.security.KeyPair pair = g.generateKeyPair();
+        java.security.interfaces.ECPrivateKey privateKey = (java.security.interfaces.ECPrivateKey) pair.getPrivate();
+        java.security.interfaces.ECPublicKey publicKey = (java.security.interfaces.ECPublicKey) pair.getPublic();
 
-        ECPublicKey publicKey = (ECPublicKey) pair.getPublic();
-        ECPrivateKey privateKey = (ECPrivateKey) pair.getPrivate();
+        //Send the S part to the card
+        byte[] privateKeyArray = privateKey.getS().toByteArray();
 
+        CommandAPDU sendKeyPairAPDU = new CommandAPDU(CLASS, SEND_KEYPAIR, 0, 0, privateKeyArray, privateKeyArray.length);
+        ResponseAPDU responsePrivate = simulator.transmitCommand(sendKeyPairAPDU);
 
-//        CommandAPDU sendKeyPairAPDU = new CommandAPDU(CLASS, SEND_KEYPAIR, 0, 0, );
+        //The card sends a signature check on the message 42
+        byte[] signatureData = responsePrivate.getData();
+        Signature signature = Signature.getInstance("ECDSA", "BC");
+        signature.initVerify(publicKey);
+        signature.update((byte) 42);
+        //Lets check it
+        assertTrue(signature.verify(signatureData, 1, signatureData.length-1));
+
+        //Check whether it fails with a wrong message
+        signature.update((byte) 41);
+        assertFalse(signature.verify(signatureData, 1, signatureData.length-1));
+
+        //Or with a wrong key
+        signature.initVerify(g.generateKeyPair().getPublic());
+        signature.update((byte) 42);
+        assertFalse(signature.verify(signatureData, 1, signatureData.length-1));
     }
 
     public void testVerify() throws javax.smartcardio.CardException, InvalidAlgorithmParameterException, NoSuchProviderException, NoSuchAlgorithmException {
