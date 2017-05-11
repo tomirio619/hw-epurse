@@ -37,6 +37,7 @@ public class TerminalThread implements Runnable {
                             ResponseAPDU response = ch.transmit(selectApplet);
                             System.out.println(DatatypeConverter.printHexBinary(selectApplet.getBytes()));
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
+
                         } catch (Exception e) {
                         }
                         card.disconnect(false);

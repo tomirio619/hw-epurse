@@ -33,12 +33,10 @@ public class Epurse extends Applet implements ISO7816 {
 
     private final static short UNKNOWN_INSTRUCTION_ERROR = (short) 1;
 
-    private final byte[] tmp;
-    private final byte[] appletAID;
+    private byte[] transientBuffer;
 
     public Epurse() {
-        tmp = new byte[128];
-        appletAID = new byte[8];
+        transientBuffer = JCSystem.makeTransientByteArray((short) 256, JCSystem.CLEAR_ON_RESET);
         register();
     }
 
@@ -49,15 +47,6 @@ public class Epurse extends Applet implements ISO7816 {
     public boolean select(){
         return true;
     }
-
-    private short checkEquals(byte a, byte b){
-        if (a == b){
-            return 1;
-        }else{
-            return 0;
-        }
-    }
-
 
     /**
      * @noinspection UnusedDeclaration
@@ -70,44 +59,23 @@ public class Epurse extends Applet implements ISO7816 {
 
         AID aid = JCSystem.getAID();
         byte[] buffer = apdu.getBuffer();
-        // Store AID in appletAID byte array
-        aid.getBytes(appletAID, (short) 0);
         byte cla = buffer[OFFSET_CLA];  // Class byte
         byte ins = buffer[OFFSET_INS];  // Instruction byte
-
-        ISOException.throwIt(Util.makeShort(cla, ins));
+//
+//        ISOException.throwIt(Util.makeShort(cla, ins));
 
         switch (ins) {
             //Verification APDUs:
-            case SELECT:
-                // Check whether the API send to us matches this Applet's AID
-                short readCount = apdu.setIncomingAndReceive();
-//                System.out.println("Readcount: " + readCount);
-                Util.arrayCopy(buffer, OFFSET_CDATA, tmp, (short) 0, readCount);
-//                System.out.println("Received AID:\t" + DatatypeConverter.printHexBinary(tmp));
-//                System.out.println("Applet AID: \t" + DatatypeConverter.printHexBinary(appletAID));
-//                System.out.println("APDU: " + DatatypeConverter.printHexBinary(buffer));
-                if (Util.arrayCompare(tmp, (short) 0, appletAID, (short) 0, (short) appletAID.length) == (byte) 0) {
-                    // SELECT succeeded
-//                    System.out.println("Success!");
-                    short le = apdu.setOutgoing();
-                    if (le < (short) 2) {
-                        ISOException.throwIt(SW_WRONG_LENGTH);
-                        return;
-                    }
-                    apdu.setOutgoingLength((short) 3);
-                    // build response data in apdu.buffer[ 0.. outCount-1 ];
-                    buffer[0] = (byte) 8;
-                    buffer[1] = (byte) 8;
-                    buffer[3] = (byte) 8;
-                    apdu.sendBytes((short) 0, (short) 3);
-                    // return good complete status 90 00
-                } else {
-                    ISOException.throwIt(SW_APPLET_SELECT_FAILED);
-                }
-                break;
             case VERIFICATION_HI:
-                //TODO:
+                short datalength = (short) buffer[OFFSET_LC];
+                Util.arrayCopy(buffer, OFFSET_CDATA, transientBuffer, (short) 0, datalength);
+                short randomNr = (short) (Util.makeShort(transientBuffer[0], transientBuffer[1])+1);
+                transientBuffer[0] = (byte) (randomNr >> 8);
+                transientBuffer[1] = (byte) randomNr;
+                apdu.setOutgoing();
+                apdu.setOutgoingLength((short) 2);
+                apdu.sendBytesLong(transientBuffer, (short) 0, (short) 2);
+                break;
             case VERIFICATION_V:
                 //TODO:
                 // Personalization APDUs:

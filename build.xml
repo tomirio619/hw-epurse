@@ -198,10 +198,11 @@
         </sequential>
     </macrodef>
 
-    <macrodef name="install_applet">
+    <macrodef name="install_applet" >
         <attribute name="PACKAGENAMEUNPACKAGED"/>
         <attribute name="APPLETNAME"/>
         <sequential>
+            <delete_applet/>
             <java jar="${GP_HOME}/gp.jar" fork="true" failonerror="true">
                 <arg line="-install ${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}.cap -default"/>
             </java>
@@ -209,9 +210,6 @@
     </macrodef>
 
     <macrodef name="delete_applet">
-        <attribute name="PACKAGENAMEUNPACKAGED"/>
-        <attribute name="APPLETNAME"/>
-        <attribute name="APPLETAID"/>
         <sequential>
             <java jar="${GP_HOME}/gp.jar" fork="true" failonerror="true">
                 <arg line="--deletedeps --delete -default"/>
