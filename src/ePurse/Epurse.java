@@ -1,8 +1,17 @@
 package ePurse;
 
 import javacard.framework.*;
+import javacard.security.KeyBuilder;
+import javacard.security.KeyPair;
+import javacard.security.Signature;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
+import org.bouncycastle.crypto.util.PrivateKeyInfoFactory;
+import org.bouncycastle.util.encoders.Hex;
 
+import javax.crypto.spec.SecretKeySpec;
 import javax.xml.bind.DatatypeConverter;
+import java.security.PublicKey;
+import java.security.interfaces.ECPrivateKey;
 
 
 /**
@@ -28,6 +37,8 @@ public class Epurse extends Applet implements ISO7816 {
 
     private final static byte VERIFICATION_HI = (byte) 0x41;
     private final static byte VERIFICATION_V = (byte) 0x42;
+    private final static byte KEYPAIR_PRIVATE = (byte) 0x43;
+
 
     private final static byte SELECT = (byte) 0xA4;
 
@@ -35,8 +46,12 @@ public class Epurse extends Applet implements ISO7816 {
 
     private byte[] transientBuffer;
 
+    private KeyPair keypair;
+    private Signature signature;
+
     public Epurse() {
         transientBuffer = JCSystem.makeTransientByteArray((short) 256, JCSystem.CLEAR_ON_RESET);
+        javacard.security.ECPrivateKey privateKey = ECPrivateKey.setS();
         register();
     }
 
@@ -73,6 +88,7 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
 
+
     /**
      * @noinspection UnusedDeclaration
      */
@@ -96,13 +112,14 @@ public class Epurse extends Applet implements ISO7816 {
                 incrementNumberAndStore(transientBuffer[0], transientBuffer[1], (short) 0);
 
                 //Sign the response
-
-
+                transientBuffer[2] = (byte) 42;
+                signature.init(keypair.getPrivate(), Signature.MODE_SIGN);
+                short signatureSize = signature.sign(transientBuffer, (short) 0, (short) 3, transientBuffer, (short) 4);
 
                 //Send the response
                 apdu.setOutgoing();
                 apdu.setOutgoingLength((short) 2);
-                apdu.sendBytesLong(transientBuffer, (short) 0, (short) 2);
+                apdu.sendBytesLong(transientBuffer, (short) 0, (short) (3+signatureSize));
                 break;
             case VERIFICATION_V:
                 //TODO:
