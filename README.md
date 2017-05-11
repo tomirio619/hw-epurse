@@ -77,13 +77,13 @@ Response APDU:
 | No data | 0xx9000 | Successful processing |
 | | 0x6999 | Applet selection failed |
 
-## VERIFY command
+## VERIFY HI command
 
 Command APDU:
 
 | CLA | INS | P1 | P2 | Lc | Data field | Le |
 | ----|:---:| --:|--:| --:| --:| --:|
-| 0xB0 | 0x20 | 0x0 | 0x0 | Length of the PIN data | PIN data | N/A |
+| 0xB0 | 0x41 | 0x0 | 0x0 | 0x0 | 0x0 | N/A |
 
 Response APDU:
 
@@ -91,6 +91,8 @@ Response APDU:
 | ----|:---:| --:|
 | No data | 0xx9000 | Successful processing |
 | | 0x6300 | Verification failed |
+
+
 
 ## CREDIT command
 
@@ -125,3 +127,18 @@ Response APDU:
 | | 0x6301 | PIN verification required |
 | | 0x6A83 | Invalid debit amount |
 | | 0x6A85 | Negative balance |
+
+## VERIFY PIN command
+
+Command APDU:
+
+| CLA | INS | P1 | P2 | Lc | Data field | Le |
+| ----|:---:| --:|--:| --:| --:| --:|
+| 0xB0 | 0x20 | 0x0 | 0x0 | Length of the PIN data | PIN data | N/A |
+
+Response APDU:
+
+| Optional | Status word | Meaning |
+| ----|:---:| --:|
+| No data | 0xx9000 | Successful processing |
+| | 0x6300 | Verification failed |
