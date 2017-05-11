@@ -49,6 +49,31 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
     /**
+     *
+     * @param number the number to increment
+     * @param offset from which index it should write the random number to the transcient buffer
+     */
+    private void incrementNumberAndStore(short number, short offset){
+        number += 1;
+        transientBuffer[offset] = (byte) (number >> 8);
+        transientBuffer[offset+1] = (byte) number;
+    }
+
+    /**
+     * Big endian
+     * @param msb
+     * @param lsb
+     * @param offset from which index it should write the random number to the transcient buffer
+     */
+    private void incrementNumberAndStore(byte msb, byte lsb, short offset){
+        short number = Util.makeShort(msb, lsb);
+        number += 1;
+        transientBuffer[offset] = (byte) (number >> 8);
+        transientBuffer[offset+1] = (byte) number;
+    }
+
+
+    /**
      * @noinspection UnusedDeclaration
      */
     public void process(APDU apdu) {
@@ -61,17 +86,20 @@ public class Epurse extends Applet implements ISO7816 {
         byte[] buffer = apdu.getBuffer();
         byte cla = buffer[OFFSET_CLA];  // Class byte
         byte ins = buffer[OFFSET_INS];  // Instruction byte
-//
-//        ISOException.throwIt(Util.makeShort(cla, ins));
 
         switch (ins) {
             //Verification APDUs:
             case VERIFICATION_HI:
+                //Increment the received number
                 short datalength = (short) buffer[OFFSET_LC];
                 Util.arrayCopy(buffer, OFFSET_CDATA, transientBuffer, (short) 0, datalength);
-                short randomNr = (short) (Util.makeShort(transientBuffer[0], transientBuffer[1])+1);
-                transientBuffer[0] = (byte) (randomNr >> 8);
-                transientBuffer[1] = (byte) randomNr;
+                incrementNumberAndStore(transientBuffer[0], transientBuffer[1], (short) 0);
+
+                //Sign the response
+
+
+
+                //Send the response
                 apdu.setOutgoing();
                 apdu.setOutgoingLength((short) 2);
                 apdu.sendBytesLong(transientBuffer, (short) 0, (short) 2);

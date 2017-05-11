@@ -118,8 +118,6 @@ public class Simulator extends TestCase {
         short incremented = Util.makeShort(randomInc[0], randomInc[1]);
 
         assertEquals(random+1, incremented);
-        
-
     }
 
 }
