@@ -4,7 +4,7 @@
 public class Terminal {
 
     public static void main(String[] args) {
-//        TerminalThread terminalThread = new TerminalThread();
-//        new Thread(terminalThread).run();
+        TerminalThread terminalThread = new TerminalThread();
+        new Thread(terminalThread).run();
     }
 }

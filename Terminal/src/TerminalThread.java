@@ -1,10 +1,19 @@
+import javacard.framework.ISO7816;
+import org.bouncycastle.util.encoders.Hex;
+
 import javax.smartcardio.*;
+import javax.xml.bind.DatatypeConverter;
+import javax.xml.crypto.Data;
+import java.sql.DataTruncation;
 import java.util.List;
 
 /**
  * Created by Tomirio on 9-5-2017.
  */
 public class TerminalThread implements Runnable {
+
+    private static final String APPLET_AID = "a0404142434445461001";
+
     @Override
     public void run() {
         try {
@@ -23,6 +32,11 @@ public class TerminalThread implements Runnable {
                         Card card = c.connect("*");
                         try {
                             CardChannel ch = card.getBasicChannel();
+                            System.out.println(DatatypeConverter.printHexBinary(Hex.decode(APPLET_AID)));
+                            CommandAPDU selectApplet = new CommandAPDU(ISO7816.CLA_ISO7816, ISO7816.INS_SELECT, 4, 0, Hex.decode(APPLET_AID));
+                            ResponseAPDU response = ch.transmit(selectApplet);
+                            System.out.println(DatatypeConverter.printHexBinary(selectApplet.getBytes()));
+                            System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
                         } catch (Exception e) {
                         }
                         card.disconnect(false);

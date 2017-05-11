@@ -2,6 +2,8 @@ package ePurse;
 
 import javacard.framework.*;
 
+import javax.xml.bind.DatatypeConverter;
+
 
 /**
  * @noinspection ClassNamePrefixedWithPackageName, ImplicitCallToSuper, MethodOverridesStaticMethodOfSuperclass, ResultOfObjectAllocationIgnored
@@ -44,16 +46,37 @@ public class Epurse extends Applet implements ISO7816 {
         new Epurse();
     }
 
+    public boolean select(){
+        return true;
+    }
+
+    private short checkEquals(byte a, byte b){
+        if (a == b){
+            return 1;
+        }else{
+            return 0;
+        }
+    }
+
+
     /**
      * @noinspection UnusedDeclaration
      */
     public void process(APDU apdu) {
+
+        if (selectingApplet()){
+            return;
+        }
+
         AID aid = JCSystem.getAID();
         byte[] buffer = apdu.getBuffer();
         // Store AID in appletAID byte array
         aid.getBytes(appletAID, (short) 0);
         byte cla = buffer[OFFSET_CLA];  // Class byte
         byte ins = buffer[OFFSET_INS];  // Instruction byte
+
+        ISOException.throwIt(Util.makeShort(cla, ins));
+
         switch (ins) {
             //Verification APDUs:
             case SELECT:
@@ -74,9 +97,9 @@ public class Epurse extends Applet implements ISO7816 {
                     }
                     apdu.setOutgoingLength((short) 3);
                     // build response data in apdu.buffer[ 0.. outCount-1 ];
-                    buffer[0] = (byte) 1;
-                    buffer[1] = (byte) 2;
-                    buffer[3] = (byte) 3;
+                    buffer[0] = (byte) 8;
+                    buffer[1] = (byte) 8;
+                    buffer[3] = (byte) 8;
                     apdu.sendBytes((short) 0, (short) 3);
                     // return good complete status 90 00
                 } else {
