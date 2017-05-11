@@ -13,12 +13,20 @@ import junit.framework.TestCase;
 import org.bouncycastle.util.encoders.Hex;
 import org.junit.BeforeClass;
 
+import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.NoSuchPaddingException;
 import javax.smartcardio.*;
 import javax.xml.bind.DatatypeConverter;
+import java.nio.ByteBuffer;
 import java.security.*;
 import java.security.Signature;
 import java.security.interfaces.*;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
 import java.security.spec.ECGenParameterSpec;
+import java.security.spec.RSAKeyGenParameterSpec;
 import java.util.List;
 
 /**
@@ -48,6 +56,7 @@ public class Simulator extends TestCase {
     private final static byte VERIFICATION_HI = (byte) 0x41;
     private final static byte VERIFICATION_V = (byte) 0x42;
     private final static byte SEND_KEYPAIR = (byte) 0x43;
+    private final static byte SEND_DECRYPTIONKEY = (byte) 0x44;
 
     private static boolean setUpIsDone = false;
     private static CardChannel cardChannel = null;
@@ -107,7 +116,7 @@ public class Simulator extends TestCase {
         setUpIsDone = true;
     }
 
-    public void testSendKeyPair() throws NoSuchProviderException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, SignatureException {
+    public void testSignature() throws NoSuchProviderException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, SignatureException {
         //First generate a signing keypair
         ECGenParameterSpec ecGenParameterSpec = new ECGenParameterSpec("prime192v1");
         KeyPairGenerator g = KeyPairGenerator.getInstance("ECDSA", "BC");
@@ -138,6 +147,35 @@ public class Simulator extends TestCase {
         signature.initVerify(g.generateKeyPair().getPublic());
         signature.update((byte) 42);
         assertFalse(signature.verify(signatureData, 1, signatureData.length-1));
+    }
+
+    public void testEncryption() throws NoSuchProviderException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, NoSuchPaddingException, InvalidKeyException, BadPaddingException, IllegalBlockSizeException {
+        //First generate a encryption keypair
+        KeyPairGenerator g = KeyPairGenerator.getInstance("RSA", "BC");
+        g.initialize(1024, new SecureRandom());
+        java.security.KeyPair pair = g.generateKeyPair();
+        RSAPrivateKey privateKey = (RSAPrivateKey) pair.getPrivate();
+        RSAPublicKey publicKey = (RSAPublicKey) pair.getPublic();
+
+
+        byte[] plainText = new byte[]{0x42};
+        Cipher cipher = Cipher.getInstance("RSA", "BC");
+        cipher.init(Cipher.ENCRYPT_MODE, pair.getPublic());
+        byte[] cipherText = cipher.doFinal(plainText);
+
+        byte[] exponentBytes = privateKey.getPrivateExponent().toByteArray();
+        byte[] modulusBytes = privateKey.getModulus().toByteArray();
+        //Append the two byte arrays into one
+        ByteBuffer bb = ByteBuffer.allocate(exponentBytes.length);
+        bb.put(exponentBytes);
+//        bb.put(modulusBytes);
+//        bb.put(cipherText);
+        byte[] decryptionKeyBytes = bb.array();
+        System.out.println("Sending exponent, modulus and ciphertext. Size: " + decryptionKeyBytes.length);
+
+        CommandAPDU sendDecryptionKeyAPDU = new CommandAPDU(CLASS, SEND_DECRYPTIONKEY, 0, 0, exponentBytes, 127);
+        ResponseAPDU responseDecryption = simulator.transmitCommand(sendDecryptionKeyAPDU);
+        System.out.println(DatatypeConverter.printHexBinary(responseDecryption.getData()));
     }
 
     public void testVerify() throws javax.smartcardio.CardException, InvalidAlgorithmParameterException, NoSuchProviderException, NoSuchAlgorithmException {
