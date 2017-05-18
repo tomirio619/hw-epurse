@@ -1,21 +1,9 @@
 package ePurse;
-
-import com.licel.jcardsim.crypto.ECPrivateKeyImpl;
 import javacard.framework.*;
 import javacard.security.*;
-import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
-import org.bouncycastle.crypto.util.PrivateKeyInfoFactory;
-import org.bouncycastle.util.encoders.Hex;
+import javacard.security.KeyPair;
+import javacard.security.Signature;
 
-import javax.crypto.spec.SecretKeySpec;
-import javax.xml.bind.DatatypeConverter;
-import java.security.KeyFactory;
-import java.security.NoSuchAlgorithmException;
-import java.security.NoSuchProviderException;
-import java.security.PublicKey;
-import java.security.interfaces.ECPrivateKey;
-import java.security.interfaces.RSAPublicKey;
-import java.security.spec.PKCS8EncodedKeySpec;
 
 
 /**
@@ -42,6 +30,8 @@ public class Epurse extends Applet implements ISO7816 {
     private final static byte VERIFICATION_HI = (byte) 0x41;
     private final static byte VERIFICATION_V = (byte) 0x42;
     private final static byte KEYPAIR_PRIVATE = (byte) 0x43;
+    private final static byte KEYPAIR_PRIVATE_RSA = (byte) 0x45;
+
     private final static byte DECRYPTION_KEY = (byte) 0x44;
 
 
@@ -51,14 +41,32 @@ public class Epurse extends Applet implements ISO7816 {
 
     private byte[] transientBuffer;
 
-    private javacard.security.ECPrivateKey signingKey;
+    private KeyPair kp;
+    private Signature signingKey;
+
+
     private RSAPrivateKey decryptionKey;
     private Signature signature;
 
+
+    RSAPublicKey pubKey;
+    RSAPrivateKey privKey;
+
     public Epurse() {
         transientBuffer = JCSystem.makeTransientByteArray((short) 256, JCSystem.CLEAR_ON_RESET);
-        signingKey = (javacard.security.ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE, KeyBuilder.LENGTH_EC_FP_192, false);
-        signature = Signature.getInstance(Signature.ALG_ECDSA_SHA, false);
+
+        pubKey = (RSAPublicKey)KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC,
+                KeyBuilder.LENGTH_RSA_1024,false);
+        privKey = (RSAPrivateKey)KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PRIVATE,
+                KeyBuilder.LENGTH_RSA_1024,false);
+        signingKey = Signature.getInstance(KeyPair.ALG_RSA,false);
+
+
+        //KeyBuilder.buildKey()
+        //signingKey = Signature.getInstance(KeyPair.ALG_EC_FP, false);//(javacard.security.ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE, KeyBuilder.LENGTH_EC_FP_192, false);
+        //signingKey.init(kp.getPrivate(), Signature.MODE_SIGN);
+        //signature = Signature.getInstance(Signature.ALG_ECDSA_SHA, false);
+
         register();
     }
 
@@ -78,7 +86,7 @@ public class Epurse extends Applet implements ISO7816 {
     private void incrementNumberAndStore(short number, short offset){
         number += 1;
         transientBuffer[offset] = (byte) (number >> 8);
-        transientBuffer[offset+1] = (byte) number;
+       // transientBuffer[offset+(short)1] = (byte) number;
     }
 
     /**
@@ -91,7 +99,7 @@ public class Epurse extends Applet implements ISO7816 {
         short number = Util.makeShort(msb, lsb);
         number += 1;
         transientBuffer[offset] = (byte) (number >> 8);
-        transientBuffer[offset+1] = (byte) number;
+        //transientBuffer[offset+((short)1)] = (byte) number;
     }
 
 
@@ -106,24 +114,99 @@ public class Epurse extends Applet implements ISO7816 {
         }
 
         AID aid = JCSystem.getAID();
+        //Only header 5 bytes header available in buffer H
         byte[] buffer = apdu.getBuffer();
+
         byte cla = buffer[OFFSET_CLA];  // Class byte
         byte ins = buffer[OFFSET_INS];  // Instruction byte
+        byte p1 = buffer[OFFSET_P1];   // Parameter 1 byte
+        short lc = (short)(buffer[OFFSET_LC] & 0x00FF);
+
 
         switch (ins) {
             //Init phase:
+            case KEYPAIR_PRIVATE_RSA:{
+
+                boolean isModulus = p1==(byte)0;
+                if(isModulus){
+                    readBuffer(apdu,transientBuffer,(short)0,lc);
+                    privKey.setModulus(transientBuffer,(short)0,lc);
+                }else {
+                    readBuffer(apdu,transientBuffer,(short)0,lc);
+                    privKey.setExponent(transientBuffer,(short)0,lc);
+                }
+
+                break;
+            }
             case KEYPAIR_PRIVATE: {
                 //Todo: check whether the state allows for personalisation
 
-                short datalength = (short) buffer[OFFSET_LC];
+
+                try{
+                    // Build keys
+                    //ECPrivateKey privKey = (ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE, KeyBuilder.LENGTH_EC_FP_192, false);
+                    //ECPublicKey pubKey = (ECPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PUBLIC, KeyBuilder.LENGTH_EC_FP_192, false);
+                    //kp = new KeyPair(pubKey, privKey);
+
+                    signingKey = Signature.getInstance(Signature.ALG_RSA_SHA_PKCS1, false);
+                    signingKey.init(privKey, Signature.MODE_SIGN);
+                    //kp = new KeyPair(KeyPair.ALG_EC_FP, KeyBuilder.LENGTH_EC_FP_192);
+                    //kp.genKeyPair();// breaks here
+
+                }
+                catch( CryptoException e ) {
+                    CryptoException.throwIt( e.getReason() );
+                }
+
+                byte datalength =  buffer[OFFSET_LC];
+
+                //After setIncomingAndReceive data is available in buffer RD
+                byte byteRead = (byte)(apdu.setIncomingAndReceive());
+
+                if (byteRead != datalength) ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+
+                //short cPrivateLength = signingKey.getS(transientBuffer,(short)0);
                 Util.arrayCopy(buffer, OFFSET_CDATA, transientBuffer, (short) 0, datalength);
-                signingKey.setS(transientBuffer, (short) 0, datalength);
-                signature.init(signingKey, Signature.MODE_SIGN);
-                transientBuffer[0] = (byte) 42;
+                //signingKey.setS(transientBuffer, (short) 0, datalength);
+
+
+                //(datalength & 0x00FF);
+                //transientBuffer[1] = (byte)((datalength & 0xFF00) >> 8);
+
+                // inform system that the applet has finished
+                // processing the command and the system should
+                // now prepare to construct a response APDU
+                // which contains data field SD
+                short le = apdu.setOutgoing();
+
+                //informs the CAD the actual number of bytes ret
+
+
                 short length = signature.sign(transientBuffer, (short) 0, (short) 1, transientBuffer, (short) 1);
-                apdu.setOutgoing();
+
+                Util.arrayCopy(buffer, OFFSET_CDATA, transientBuffer, (short) 0, datalength);
+
+                apdu.setOutgoingLength((short)(1 + length));
+
+
+
+                // send the 1 byte at the offset
+                // 0 in the apdu buffer
+                apdu.sendBytes((short)0, (short) (1 + length));
+
+
+
+
+
+
+
+                //transientBuffer[0] = (byte) 42;
+
+                //apdu.setOutgoingAndSend((short)0, (short) (1 + length));
+
+                /*apdu.setOutgoing();
                 apdu.setOutgoingLength((short) (1 + length));
-                apdu.sendBytesLong(transientBuffer, (short) 0, (short) (1 + length));
+                apdu.sendBytesLong(transientBuffer, (short) 0, (short) (1 + length));*/
 
                 //Todo: mark in the state that the card does not accept any new keys
                 break;
@@ -149,6 +232,7 @@ public class Epurse extends Applet implements ISO7816 {
                 //Sign the response
                 transientBuffer[2] = (byte) 42;
 //                signature.init(keypair.getPrivate(), Signature.MODE_SIGN);
+
                 short signatureSize = signature.sign(transientBuffer, (short) 0, (short) 3, transientBuffer, (short) 4);
 
                 //Send the response
@@ -191,6 +275,20 @@ public class Epurse extends Applet implements ISO7816 {
 
             default:
                 throw new ISOException(UNKNOWN_INSTRUCTION_ERROR);
+        }
+    }
+
+    private void readBuffer(APDU apdu, byte[] dest, short offset,
+                            short length) {
+        byte[] buf = apdu.getBuffer();
+        short readCount = apdu.setIncomingAndReceive();
+        short i = 0;
+        Util.arrayCopy(buf,OFFSET_CDATA,dest,offset,readCount);
+        while ((short)(i + readCount) < length) {
+            i += readCount;
+            offset += readCount;
+            readCount = (short)apdu.receiveBytes(OFFSET_CDATA);
+            Util.arrayCopy(buf,OFFSET_CDATA,dest,offset,readCount);
         }
     }
 
