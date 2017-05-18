@@ -1,10 +1,6 @@
 package ePurse;
 import javacard.framework.*;
 import javacard.security.*;
-import javacard.security.KeyPair;
-import javacard.security.Signature;
-
-
 
 /**
  * @noinspection ClassNamePrefixedWithPackageName, ImplicitCallToSuper, MethodOverridesStaticMethodOfSuperclass, ResultOfObjectAllocationIgnored
@@ -54,19 +50,11 @@ public class Epurse extends Applet implements ISO7816 {
 
     public Epurse() {
         transientBuffer = JCSystem.makeTransientByteArray((short) 256, JCSystem.CLEAR_ON_RESET);
-
         pubKey = (RSAPublicKey)KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC,
                 KeyBuilder.LENGTH_RSA_1024,false);
         privKey = (RSAPrivateKey)KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PRIVATE,
                 KeyBuilder.LENGTH_RSA_1024,false);
         signingKey = Signature.getInstance(KeyPair.ALG_RSA,false);
-
-
-        //KeyBuilder.buildKey()
-        //signingKey = Signature.getInstance(KeyPair.ALG_EC_FP, false);//(javacard.security.ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE, KeyBuilder.LENGTH_EC_FP_192, false);
-        //signingKey.init(kp.getPrivate(), Signature.MODE_SIGN);
-        //signature = Signature.getInstance(Signature.ALG_ECDSA_SHA, false);
-
         register();
     }
 

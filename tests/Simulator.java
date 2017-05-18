@@ -118,36 +118,9 @@ public class Simulator extends TestCase {
 
     public void testSignature() throws NoSuchProviderException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, SignatureException {
         //First generate a signing keypair
-        ECGenParameterSpec ecGenParameterSpec = new ECGenParameterSpec("prime192v1");
-        KeyPairGenerator g = KeyPairGenerator.getInstance("ECDSA", "BC");
-        g.initialize(ecGenParameterSpec, new SecureRandom());
-        java.security.KeyPair pair = g.generateKeyPair();
-        java.security.interfaces.ECPrivateKey privateKey = (java.security.interfaces.ECPrivateKey) pair.getPrivate();
-        java.security.interfaces.ECPublicKey publicKey = (java.security.interfaces.ECPublicKey) pair.getPublic();
 
-        //Send the S part to the card
-        byte[] privateKeyArray = privateKey.getS().toByteArray();
-
-        CommandAPDU sendKeyPairAPDU = new CommandAPDU(CLASS, SEND_KEYPAIR, 0, 0, privateKeyArray, privateKeyArray.length);
-        ResponseAPDU responsePrivate = simulator.transmitCommand(sendKeyPairAPDU);
-
-        //The card sends a signature check on the message 42
-        byte[] signatureData = responsePrivate.getData();
-        Signature signature = Signature.getInstance("ECDSA", "BC");
-        signature.initVerify(publicKey);
-        signature.update((byte) 42);
-        //Lets check it
-        assertTrue(signature.verify(signatureData, 1, signatureData.length-1));
-
-        //Check whether it fails with a wrong message
-        signature.update((byte) 41);
-        assertFalse(signature.verify(signatureData, 1, signatureData.length-1));
-
-        //Or with a wrong key
-        signature.initVerify(g.generateKeyPair().getPublic());
-        signature.update((byte) 42);
-        assertFalse(signature.verify(signatureData, 1, signatureData.length-1));
     }
+
 
     public void testEncryption() throws NoSuchProviderException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, NoSuchPaddingException, InvalidKeyException, BadPaddingException, IllegalBlockSizeException {
         //First generate a encryption keypair
