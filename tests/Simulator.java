@@ -19,6 +19,7 @@ import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 import javax.smartcardio.*;
 import javax.xml.bind.DatatypeConverter;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.security.*;
 import java.security.Signature;
@@ -55,8 +56,10 @@ public class Simulator extends TestCase {
 
     private final static byte VERIFICATION_HI = (byte) 0x41;
     private final static byte VERIFICATION_V = (byte) 0x42;
-    private final static byte SEND_KEYPAIR = (byte) 0x43;
     private final static byte SEND_DECRYPTIONKEY = (byte) 0x44;
+
+    private final static byte SEND_KEYPAIR = (byte) 0x43;
+    private final static byte SEND_KEYPAIR_RSA = (byte) 0x45;
 
     private static boolean setUpIsDone = false;
     private static CardChannel cardChannel = null;
@@ -116,8 +119,57 @@ public class Simulator extends TestCase {
         setUpIsDone = true;
     }
 
-    public void testSignature() throws NoSuchProviderException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, SignatureException {
-        //First generate a signing keypair
+    public void testSignatureRSA() {
+
+        RSAPublicKey publickey = null;
+
+        RSAPrivateKey privatekey = null;
+
+        /* Generate keypair. */
+        try {
+            System.out.println("Generating keys...");
+            KeyPairGenerator generator = null;
+
+            generator = KeyPairGenerator.getInstance("RSA");
+
+            generator.initialize(1024);
+            java.security.KeyPair keypair = generator.generateKeyPair();
+            publickey = (RSAPublicKey) keypair.getPublic();
+            privatekey = (RSAPrivateKey) keypair.getPrivate();
+
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+
+        /* Send private key. */
+        try {
+            byte[] modulus = getBytes(privatekey.getModulus());
+
+            CommandAPDU capdu;
+            capdu = new CommandAPDU(CLASS, SEND_KEYPAIR_RSA, (byte) 0, (byte) 0, modulus);
+            ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
+            System.out.println("SEND_KEYPAIR modulus: "+responsePrivate.getSW());
+
+
+            byte[] exponent = getBytes(privatekey.getPrivateExponent());
+            capdu = new CommandAPDU(CLASS, SEND_KEYPAIR_RSA, (byte) 1, (byte) 0, exponent);
+            responsePrivate = simulator.transmitCommand(capdu);
+            System.out.println("SEND_KEYPAIR exponent: "+responsePrivate.getSW());
+
+            capdu = new CommandAPDU(CLASS, SEND_KEYPAIR, (byte) 0, (byte) 0, 0);
+            responsePrivate = simulator.transmitCommand(capdu);
+            System.out.println("SIGNING Request: " + responsePrivate.getSW());
+
+            Signature signature = Signature.getInstance("RSA", "BC");
+            signature.initVerify(publickey);
+            signature.update((byte) 42);
+            //Lets check it
+            assertTrue(signature.verify(responsePrivate.getData(), 1, responsePrivate.getData().length));
+
+        } catch (Exception e) {
+
+        }
+
 
     }
 
@@ -170,5 +222,16 @@ public class Simulator extends TestCase {
 //
 //        assertEquals(random+1, incremented);
     }
+
+    byte[] getBytes(BigInteger big) {
+        byte[] data = big.toByteArray();
+        if (data[0] == 0) {
+            byte[] tmp = data;
+            data = new byte[tmp.length - 1];
+            System.arraycopy(tmp, 1, data, 0, tmp.length - 1);
+        }
+        return data;
+    }
+
 
 }

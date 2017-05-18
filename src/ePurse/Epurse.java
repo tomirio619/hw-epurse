@@ -91,6 +91,20 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
 
+    /**
+     * Sign a payload starting from the offset with the length of the payload
+     * @param payload
+     * @param payloadOffset
+     * @param payloadLength
+     * @param output
+     * @param outputOffset
+     */
+    private short sign(byte[] payload, short payloadOffset, short payloadLength, byte[] output, short outputOffset){
+        signature = Signature.getInstance(Signature.ALG_RSA_SHA_PKCS1, false);
+        signature.init(privKey, Signature.MODE_SIGN);
+        return signature.sign(payload, payloadOffset, payloadLength, output, outputOffset);
+    }
+
 
     /**
      * @noinspection UnusedDeclaration
@@ -128,24 +142,6 @@ public class Epurse extends Applet implements ISO7816 {
             }
             case KEYPAIR_PRIVATE: {
                 //Todo: check whether the state allows for personalisation
-
-
-                try{
-                    // Build keys
-                    //ECPrivateKey privKey = (ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE, KeyBuilder.LENGTH_EC_FP_192, false);
-                    //ECPublicKey pubKey = (ECPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PUBLIC, KeyBuilder.LENGTH_EC_FP_192, false);
-                    //kp = new KeyPair(pubKey, privKey);
-
-                    signingKey = Signature.getInstance(Signature.ALG_RSA_SHA_PKCS1, false);
-                    signingKey.init(privKey, Signature.MODE_SIGN);
-                    //kp = new KeyPair(KeyPair.ALG_EC_FP, KeyBuilder.LENGTH_EC_FP_192);
-                    //kp.genKeyPair();// breaks here
-
-                }
-                catch( CryptoException e ) {
-                    CryptoException.throwIt( e.getReason() );
-                }
-
                 byte datalength =  buffer[OFFSET_LC];
 
                 //After setIncomingAndReceive data is available in buffer RD
@@ -153,13 +149,7 @@ public class Epurse extends Applet implements ISO7816 {
 
                 if (byteRead != datalength) ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
 
-                //short cPrivateLength = signingKey.getS(transientBuffer,(short)0);
                 Util.arrayCopy(buffer, OFFSET_CDATA, transientBuffer, (short) 0, datalength);
-                //signingKey.setS(transientBuffer, (short) 0, datalength);
-
-
-                //(datalength & 0x00FF);
-                //transientBuffer[1] = (byte)((datalength & 0xFF00) >> 8);
 
                 // inform system that the applet has finished
                 // processing the command and the system should
@@ -169,33 +159,10 @@ public class Epurse extends Applet implements ISO7816 {
 
                 //informs the CAD the actual number of bytes ret
 
-
-                short length = signature.sign(transientBuffer, (short) 0, (short) 1, transientBuffer, (short) 1);
-
-                Util.arrayCopy(buffer, OFFSET_CDATA, transientBuffer, (short) 0, datalength);
-
+                transientBuffer[0] = (byte) 42;
+                short length = sign(transientBuffer, (short) 0, (short) 1, transientBuffer, (short) 1);
                 apdu.setOutgoingLength((short)(1 + length));
-
-
-
-                // send the 1 byte at the offset
-                // 0 in the apdu buffer
-                apdu.sendBytes((short)0, (short) (1 + length));
-
-
-
-
-
-
-
-                //transientBuffer[0] = (byte) 42;
-
-                //apdu.setOutgoingAndSend((short)0, (short) (1 + length));
-
-                /*apdu.setOutgoing();
-                apdu.setOutgoingLength((short) (1 + length));
-                apdu.sendBytesLong(transientBuffer, (short) 0, (short) (1 + length));*/
-
+                apdu.sendBytesLong(transientBuffer, (short) 0, (short) (1+length));
                 //Todo: mark in the state that the card does not accept any new keys
                 break;
             }case DECRYPTION_KEY:{

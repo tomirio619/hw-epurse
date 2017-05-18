@@ -1,33 +1,17 @@
+import com.sun.prism.PixelFormat;
 import javacard.framework.ISO7816;
-
-import javacard.framework.Util;
 import javacard.security.*;
-import javacard.security.Key;
 import javacard.security.Signature;
 import org.bouncycastle.util.encoders.Hex;
 
 import javax.smartcardio.*;
 import javax.xml.bind.DatatypeConverter;
-import javax.xml.crypto.Data;
 import java.math.BigInteger;
 import java.security.*;
 import java.security.KeyPair;
-//import java.security.Signature;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
-import java.security.spec.ECGenParameterSpec;
-import java.security.spec.X509EncodedKeySpec;
-import java.sql.DataTruncation;
 import java.util.List;
-
-/*import javacard.security.ECPublicKey;
-import javacard.security.ECPrivateKey;
-import javacard.security.KeyPair;
-import javacard.security.Signature;*/
-
-
-import static junit.framework.TestCase.assertFalse;
-import static org.junit.Assert.assertTrue;
 
 
 /**
@@ -129,12 +113,6 @@ public class TerminalThread implements Runnable {
 
         /* Send private key. */
         try {
-            //byte[] data = readFile();
-            //X509EncodedKeySpec spec = new X509EncodedKeySpec(data);
-            //KeyFactory factory = KeyFactory.getInstance("RSA");
-            //RSAPublicKey key = (RSAPublicKey) factory.generatePublic(spec);
-
-
             byte[] modulus = getBytes(privatekey.getModulus());
 
             CommandAPDU capdu;
@@ -148,62 +126,28 @@ public class TerminalThread implements Runnable {
             responsePrivate = ch.transmit(capdu);
             System.out.println("SEND_KEYPAIR exponent: "+responsePrivate.getSW());
 
+            capdu = new CommandAPDU(CLASS, SEND_KEYPAIR, (byte) 0, (byte) 0, 0);
+            responsePrivate = ch.transmit(capdu);
+            System.out.println("SIGNING Request: " + responsePrivate.getSW());
+
+            byte[] data = {(byte) 42};
+            javacard.security.Signature signature = Signature.getInstance(Signature.ALG_RSA_SHA_PKCS1, false);
+
+            javacard.security.RSAPublicKey pkey = (javacard.security.RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC, KeyBuilder.LENGTH_RSA_1024, false);
+            pkey.setExponent(publickey.getPublicExponent().toByteArray(), (short) 0, (short) publickey.getPublicExponent().toByteArray().length);
+            pkey.setModulus(publickey.getModulus().toByteArray(), (short) 0, (short) publickey.getModulus().toByteArray().length);
+
+            signature.init(pkey, Signature.MODE_VERIFY);
+            System.out.println(DatatypeConverter.printHexBinary(responsePrivate.getData()));
+            boolean correct = signature.verify(responsePrivate.getData(), (short) 0, (short) 1, responsePrivate.getData(), (short) 1, (short) (responsePrivate.getData().length-1));
+            System.out.println(correct);
 
         } catch (Exception e) {
-
-        }
-
-        Signature signingKey = javacard.security.Signature.getInstance(javacard.security.Signature.ALG_RSA_SHA_PKCS1, false);
-        signingKey.init((Key) privatekey, javacard.security.Signature.MODE_SIGN);
-
-    }
-
-    public void testSignature(CardChannel ch) throws NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, SignatureException, CardException {
-        //First generate a signing keypair
-        System.err.println("Test Signature");
-
-
-        ECGenParameterSpec ecGenParameterSpec = new ECGenParameterSpec("prime192v1");
-        KeyPairGenerator g = null;
-        try {
-            g = KeyPairGenerator.getInstance("EC", "BC");
-        } catch (NoSuchProviderException e) {
             e.printStackTrace();
         }
-        g.initialize(ecGenParameterSpec, new SecureRandom());
-        java.security.KeyPair pair = g.generateKeyPair();
-        java.security.interfaces.ECPrivateKey privateKey = (java.security.interfaces.ECPrivateKey) pair.getPrivate();
-        java.security.interfaces.ECPublicKey publicKey = (java.security.interfaces.ECPublicKey) pair.getPublic();
 
-        //Send the S part to the card
-        byte[] privateKeyArray = privateKey.getS().toByteArray();
 
-        CommandAPDU sendKeyPairAPDU = new CommandAPDU(CLASS, SEND_KEYPAIR, 0, 0, privateKeyArray, privateKeyArray.length);
-        ResponseAPDU responsePrivate = ch.transmit(sendKeyPairAPDU);
-
-        //The card sends a signature check on the message 42
-        byte[] signatureData = responsePrivate.getData();
-        Signature signature = null;
-        try {
-            signature = Signature.getInstance("EC", "BC");
-        } catch (NoSuchProviderException e) {
-            e.printStackTrace();
-        }
-        signature.initVerify(publicKey);
-        signature.update((byte) 42);
-        //Lets check it
-        assertTrue(signature.verify(signatureData, 1, signatureData.length - 1));
-
-        //Check whether it fails with a wrong message
-        signature.update((byte) 41);
-        assertFalse(signature.verify(signatureData, 1, signatureData.length - 1));
-
-        //Or with a wrong key
-        signature.initVerify(g.generateKeyPair().getPublic());
-        signature.update((byte) 42);
-        assertFalse(signature.verify(signatureData, 1, signatureData.length - 1));
     }
-
 
     /**
      * Gets an unsigned byte array representation of <code>big</code>. A leading
