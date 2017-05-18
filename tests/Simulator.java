@@ -6,9 +6,6 @@ import javacard.framework.CardException;
 import javacard.framework.ISO7816;
 import javacard.framework.Util;
 import javacard.security.*;
-import javacard.security.ECPrivateKey;
-import javacard.security.ECPublicKey;
-import javacard.security.KeyPair;
 import junit.framework.TestCase;
 import org.bouncycastle.util.encoders.Hex;
 import org.junit.BeforeClass;
@@ -22,12 +19,10 @@ import javax.xml.bind.DatatypeConverter;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.security.*;
+import java.security.KeyPair;
 import java.security.Signature;
-import java.security.interfaces.*;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
-import java.security.spec.ECGenParameterSpec;
-import java.security.spec.RSAKeyGenParameterSpec;
 import java.util.List;
 
 /**
@@ -64,7 +59,9 @@ public class Simulator extends TestCase {
     private static boolean setUpIsDone = false;
     private static CardChannel cardChannel = null;
     private static JavaxSmartCardInterface simulator = null;
-    private static RandomData randomData = null;
+    SecureRandom secureRandom;
+
+
 
     public void testSelect() throws CardException, NoSuchAlgorithmException, javax.smartcardio.CardException {
         System.out.println("Test Select");
@@ -76,11 +73,12 @@ public class Simulator extends TestCase {
 
     @BeforeClass
     protected void setUp() throws Exception {
-        if (setUpIsDone){
+        if (setUpIsDone) {
             return;
         }
 
         System.out.println("Set Up");
+        secureRandom = new SecureRandom();
 
         if (Security.getProvider("jCardSim") == null) {
             JCardSimProvider provider = new JCardSimProvider();
@@ -112,7 +110,6 @@ public class Simulator extends TestCase {
         AID aid = new AID(appletAID, (short) 0, (byte) appletAID.length);
         simulator.installApplet(aid, Epurse.class);
         simulator.selectApplet(aid);
-        randomData = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
 
         Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
 
@@ -148,13 +145,13 @@ public class Simulator extends TestCase {
             CommandAPDU capdu;
             capdu = new CommandAPDU(CLASS, SEND_KEYPAIR_RSA, (byte) 0, (byte) 0, modulus);
             ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
-            System.out.println("SEND_KEYPAIR modulus: "+responsePrivate.getSW());
+            System.out.println("SEND_KEYPAIR modulus: " + responsePrivate.getSW());
 
 
             byte[] exponent = getBytes(privatekey.getPrivateExponent());
             capdu = new CommandAPDU(CLASS, SEND_KEYPAIR_RSA, (byte) 1, (byte) 0, exponent);
             responsePrivate = simulator.transmitCommand(capdu);
-            System.out.println("SEND_KEYPAIR exponent: "+responsePrivate.getSW());
+            System.out.println("SEND_KEYPAIR exponent: " + responsePrivate.getSW());
 
             capdu = new CommandAPDU(CLASS, SEND_KEYPAIR, (byte) 0, (byte) 0, 0);
             responsePrivate = simulator.transmitCommand(capdu);
@@ -169,7 +166,6 @@ public class Simulator extends TestCase {
         } catch (Exception e) {
 
         }
-
 
     }
 
@@ -207,20 +203,60 @@ public class Simulator extends TestCase {
         System.out.println("Test Verify");
         //1. Terminal sends Hi
         byte[] payload = new byte[2];
-        new SecureRandom().nextBytes(payload);
+        secureRandom.nextBytes(payload);
         short random = Util.makeShort(payload[0], payload[1]);
-        random = (short) Math.abs(random);
         System.out.println(random);
-
         CommandAPDU hiAPDU = new CommandAPDU(CLASS, VERIFICATION_HI, 0, 0, payload, 2);
         ResponseAPDU responseHi = simulator.transmitCommand(hiAPDU);
         byte[] randomInc = responseHi.getData();
 
 
-
 //        short incremented = Util.makeShort(randomInc[0], randomInc[1]);
 //
 //        assertEquals(random+1, incremented);
+    }
+
+    public void testPersonalization(){
+        System.out.println("Test Personalization");
+
+        byte [] nonceBytes = new byte[2];
+        secureRandom.nextBytes(nonceBytes);
+        CommandAPDU hiAPDU = new CommandAPDU(CLASS, PERSONALIZATION_HI, 0, 0, nonceBytes, 2);
+        ResponseAPDU responseAPDU = simulator.transmitCommand(hiAPDU);
+    }
+
+    /**
+     * Initialization involves transferring the private key to the smartcard.
+     * In addition, the public key of the backend is transferred to the card.
+     * Once this is done, the state of the card should have changed from "RAW" to "INITIALIZED".
+     * @throws NoSuchAlgorithmException
+     */
+    public void testInitialization() throws NoSuchAlgorithmException {
+        System.out.println("Test Initialization");
+
+        KeyPairGenerator generator  = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(1024);
+        KeyPair keypair = generator.generateKeyPair();
+        RSAPublicKey cardPublickey = (RSAPublicKey) keypair.getPublic();
+        RSAPrivateKey cardPrivateKey = (RSAPrivateKey) keypair.getPrivate();
+        RSAPublicKey backendPublicKey = null; // TODO retrieve the backend public key
+
+        // Transferring the private key to the card
+
+        byte[] modulus = getBytes(cardPrivateKey.getModulus());
+
+        // Sending modulus
+        CommandAPDU capdu;
+        capdu = new CommandAPDU(CLASS, SEND_KEYPAIR_RSA, (byte) 0, (byte) 0, modulus);
+        ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
+        System.out.println("SEND_KEYPAIR modulus: "+ responsePrivate.getSW());
+
+        // Sending exponent
+        byte[] exponent = getBytes(cardPrivateKey.getPrivateExponent());
+        capdu = new CommandAPDU(CLASS, SEND_KEYPAIR_RSA, (byte) 1, (byte) 0, exponent);
+        responsePrivate = simulator.transmitCommand(capdu);
+        System.out.println("SEND_KEYPAIR exponent: "+ responsePrivate.getSW());
+
     }
 
     byte[] getBytes(BigInteger big) {
