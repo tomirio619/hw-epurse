@@ -31,12 +31,12 @@
         <generate_applet_bin_std PACKAGENAMEUNPACKAGED="ePurse" APPLETNAME="Epurse"/>
     </target>
 
-    <target name="install" depends="binarize.all">
+    <target name="install" depends="binarize.all, delete">
         <install_applet PACKAGENAMEUNPACKAGED="ePurse" APPLETNAME="Epurse"/>
     </target>
 
     <target name="delete">
-        <delete_applet PACKAGENAMEUNPACKAGED="ePurse" APPLETAID="A0404142434445461001:10:01" APPLETNAME="Epurse"/>
+        <delete_applet APPLETAID="A04041424344454610" />
     </target>
 
     <!-- ======================================================== -->
@@ -202,7 +202,6 @@
         <attribute name="PACKAGENAMEUNPACKAGED"/>
         <attribute name="APPLETNAME"/>
         <sequential>
-            <delete_applet/>
             <java jar="${GP_HOME}/gp.jar" fork="true" failonerror="true">
                 <arg line="-install ${OUTPUT_DIR}/@{PACKAGENAMEUNPACKAGED}/javacard/@{PACKAGENAMEUNPACKAGED}.cap -default"/>
             </java>
@@ -210,12 +209,13 @@
     </macrodef>
 
     <macrodef name="delete_applet">
+        <attribute name="APPLETAID"/>
         <sequential>
             <java jar="${GP_HOME}/gp.jar" fork="true" failonerror="true">
-                <arg line="--deletedeps --delete -default"/>
+                <arg line="--delete -default"/>
             </java>
             <java jar="${GP_HOME}/gp.jar" fork="true" failonerror="true">
-                <arg line="--deletedeps --delete A04041424344454610"/>
+                <arg line="--deletedeps --delete @{APPLETAID}"/>
             </java>
         </sequential>
     </macrodef>
