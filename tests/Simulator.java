@@ -259,6 +259,24 @@ public class Simulator extends TestCase {
 
     }
 
+    public void testPin() {
+
+        byte[] pin = {1, 2, 3, 4};
+        try {
+            CommandAPDU capdu;
+            capdu = new CommandAPDU(CLASS, PERSONALIZATION_NEW_PIN, (byte) 0, (byte) 0, pin);
+            ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
+            System.out.println("Set pin: " + responsePrivate.getSW());
+
+            capdu = new CommandAPDU(CLASS, CREDIT_COMMIT_PIN, (byte) 0, (byte) 0, pin);
+            responsePrivate = simulator.transmitCommand(capdu);
+            System.out.println("Check pin: " + responsePrivate.getSW());
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     byte[] getBytes(BigInteger big) {
         byte[] data = big.toByteArray();
         if (data[0] == 0) {

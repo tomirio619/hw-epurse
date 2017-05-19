@@ -39,6 +39,10 @@ public class Epurse extends Applet implements ISO7816 {
 
     private final static short UNKNOWN_INSTRUCTION_ERROR = (short) 1;
 
+    final static short SW_VERIFICATION_FAILED = 0x6300;
+
+    final static short SW_PIN_VERIFICATION_REQUIRED = 0x6301;
+
     /**
      * State bytes
      */
@@ -66,6 +70,11 @@ public class Epurse extends Applet implements ISO7816 {
 
     private byte[] headerBuffer;
 
+
+    private OwnerPIN pin;
+    private final static byte PIN_LENGTH = (byte) 4;
+
+
     /**
      * Constructor
      */
@@ -77,6 +86,8 @@ public class Epurse extends Applet implements ISO7816 {
         privKey = (RSAPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PRIVATE,
                 KeyBuilder.LENGTH_RSA_1024, false);
         signingKey = Signature.getInstance(KeyPair.ALG_RSA, false);
+        pin = new OwnerPIN((byte)3, (byte)4);
+
         register();
     }
 
@@ -102,7 +113,7 @@ public class Epurse extends Applet implements ISO7816 {
     private void incrementNumberAndStore(short number, short offset) {
         number += 1;
         transientBuffer[offset] = (byte) (number >> 8);
-        // transientBuffer[offset+(short)1] = (byte) number;
+        transientBuffer[(short)(offset+(short)1)] = (byte) number;
     }
 
     /**
@@ -116,7 +127,7 @@ public class Epurse extends Applet implements ISO7816 {
         short number = Util.makeShort(msb, lsb);
         number += 1;
         transientBuffer[offset] = (byte) (number >> 8);
-        //transientBuffer[offset+((short)1)] = (byte) number;
+        transientBuffer[(short)(offset+(short)1)] = (byte) number;
     }
 
 
@@ -176,7 +187,9 @@ public class Epurse extends Applet implements ISO7816 {
                 //Todo:
             case PERSONALIZATION_NEW_PIN:
                 //TODO:
+                setPIN(apdu);
 
+                break;
                 //Decommissioning APDUs:
             case DECOMMISSIONING_HI:
                 //Todo:
@@ -193,6 +206,8 @@ public class Epurse extends Applet implements ISO7816 {
             case CREDIT_HI:
                 //TODO:
             case CREDIT_COMMIT_PIN:
+                checkPIN(apdu);
+                break;
                 //TODO:
             case CREDIT_COMMIT_NO_PIN:
                 //TODO:
@@ -304,6 +319,26 @@ public class Epurse extends Applet implements ISO7816 {
         apdu.setOutgoing();
         apdu.setOutgoingLength((short) 2);
         apdu.sendBytesLong(transientBuffer, (short) 0, (short) (3 + signatureSize));
+
+    }
+
+    private void setPIN(APDU apdu){
+        if(headerBuffer[OFFSET_LC]>PIN_LENGTH)
+            ISOException.throwIt(ISO7816.SW_WRONG_DATA);
+        else
+            readBuffer(apdu, transientBuffer, (short) 0, headerBuffer[OFFSET_LC]);
+        pin.update(transientBuffer, (short)0,(byte)4);
+
+    }
+
+    private void checkPIN(APDU apdu){
+        if(headerBuffer[OFFSET_LC]>PIN_LENGTH)
+            ISOException.throwIt(ISO7816.SW_WRONG_DATA);
+        else
+            readBuffer(apdu, transientBuffer, (short) 0, headerBuffer[OFFSET_LC]);
+            if (!pin.check(transientBuffer, (short)0, PIN_LENGTH))
+                ISOException.throwIt(SW_VERIFICATION_FAILED);
+
 
     }
 

@@ -13,6 +13,8 @@ import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.List;
 
+import ePurse.Epurse;
+
 
 /**
  * Created by Tomirio on 9-5-2017.
@@ -24,7 +26,8 @@ public class TerminalThread implements Runnable {
     private final static byte VERIFICATION_HI = (byte) 0x41;
     private final static byte SEND_KEYPAIR = (byte) 0x43;
     private final static byte SEND_KEYPAIR_RSA = (byte) 0x45;
-
+    private final static byte PERSONALIZATION_NEW_PIN = (byte) 0x32;
+    private final static byte CREDIT_COMMIT_PIN = (byte) 0x38;
 
 
     @Override
@@ -54,10 +57,8 @@ public class TerminalThread implements Runnable {
                             ResponseAPDU response = ch.transmit(selectApplet);
                             System.out.println(DatatypeConverter.printHexBinary(selectApplet.getBytes()));
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
-
-                            //testSignature(ch);
-
-                            testSignatureRSA(ch);
+                            testPin(ch);
+                            //testSignatureRSA(ch);
                             //1. Terminal sends Hi
 //                            byte[] payload = new byte[2];
 //                            new SecureRandom().nextBytes(payload);
@@ -118,13 +119,13 @@ public class TerminalThread implements Runnable {
             CommandAPDU capdu;
             capdu = new CommandAPDU(CLASS, SEND_KEYPAIR_RSA, (byte) 0, (byte) 0, modulus);
             ResponseAPDU responsePrivate = ch.transmit(capdu);
-            System.out.println("SEND_KEYPAIR modulus: "+responsePrivate.getSW());
+            System.out.println("SEND_KEYPAIR modulus: " + responsePrivate.getSW());
 
 
             byte[] exponent = getBytes(privatekey.getPrivateExponent());
             capdu = new CommandAPDU(CLASS, SEND_KEYPAIR_RSA, (byte) 1, (byte) 0, exponent);
             responsePrivate = ch.transmit(capdu);
-            System.out.println("SEND_KEYPAIR exponent: "+responsePrivate.getSW());
+            System.out.println("SEND_KEYPAIR exponent: " + responsePrivate.getSW());
 
             capdu = new CommandAPDU(CLASS, SEND_KEYPAIR, (byte) 0, (byte) 0, 0);
             responsePrivate = ch.transmit(capdu);
@@ -139,7 +140,7 @@ public class TerminalThread implements Runnable {
 
             signature.init(pkey, Signature.MODE_VERIFY);
             System.out.println(DatatypeConverter.printHexBinary(responsePrivate.getData()));
-            boolean correct = signature.verify(responsePrivate.getData(), (short) 0, (short) 1, responsePrivate.getData(), (short) 1, (short) (responsePrivate.getData().length-1));
+            boolean correct = signature.verify(responsePrivate.getData(), (short) 0, (short) 1, responsePrivate.getData(), (short) 1, (short) (responsePrivate.getData().length - 1));
             System.out.println(correct);
 
         } catch (Exception e) {
@@ -149,13 +150,29 @@ public class TerminalThread implements Runnable {
 
     }
 
+    private void testPin(CardChannel ch) {
+
+        byte[] pin = {1, 2, 3, 4};
+        try {
+            CommandAPDU capdu;
+            capdu = new CommandAPDU(CLASS, PERSONALIZATION_NEW_PIN, (byte) 0, (byte) 0, pin);
+            ResponseAPDU responsePrivate = ch.transmit(capdu);
+            System.out.println("Set pin: " + Integer.toHexString(responsePrivate.getSW()));
+
+            capdu = new CommandAPDU(CLASS, CREDIT_COMMIT_PIN, (byte) 0, (byte) 0, pin);
+            responsePrivate = ch.transmit(capdu);
+            System.out.println("Check pin: " + Integer.toHexString(responsePrivate.getSW()));
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     /**
      * Gets an unsigned byte array representation of <code>big</code>. A leading
      * zero (present only to hold sign bit) is stripped.
      *
-     * @param big
-     *            a big integer.
-     *
+     * @param big a big integer.
      * @return a byte array containing a representation of <code>big</code>.
      */
     byte[] getBytes(BigInteger big) {
