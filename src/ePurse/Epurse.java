@@ -75,6 +75,10 @@ public class Epurse extends Applet implements ISO7816 {
     private final static byte PIN_LENGTH = (byte) 4;
 
     private byte status;
+    private byte[] id = new byte[2];
+    private byte[] date = new byte[8];
+    private byte[] expirationDate = new byte[8];
+    private byte[] amount = new byte[2];
 
 
 
@@ -188,13 +192,13 @@ public class Epurse extends Applet implements ISO7816 {
                 // Personalization APDUs:
                 //Todo: check whether you are in the personalization state
             case PERSONALIZATION_HI:
-                //Todo:
+                processPersonalizationHi(apdu);
+                break;
             case PERSONALIZATION_DATES:
-                //Todo:
+                processPersonalizationDates(apdu);
+                break;
             case PERSONALIZATION_NEW_PIN:
-                //TODO:
                 setPIN(apdu);
-
                 break;
                 //Decommissioning APDUs:
             case DECOMMISSIONING_HI:
@@ -224,6 +228,8 @@ public class Epurse extends Applet implements ISO7816 {
                 throw new ISOException(UNKNOWN_INSTRUCTION_ERROR);
         }
     }
+
+
 
     /**
      * Read apdu buffer and store into a different array
@@ -330,15 +336,11 @@ public class Epurse extends Applet implements ISO7816 {
 
     private void processPersonalizationHi(APDU apdu) {
         if(status==STATE_RAW){
-
-
             byte keyValue = headerBuffer[OFFSET_P1];
             switch (keyValue){
                 case 0:
                     readBuffer(apdu, transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
                     privKey.setModulus(transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
-                    ISOException.throwIt((short)10);
-
                     break;
                 case 1:
                     readBuffer(apdu, transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
@@ -355,6 +357,12 @@ public class Epurse extends Applet implements ISO7816 {
             }
 
         }
+    }
+
+    private void processPersonalizationDates(APDU apdu) {
+        readBuffer(apdu,transientBuffer,(short)0,(short)(headerBuffer[OFFSET_LC]& 0x00FF));
+        Util.arrayCopy(transientBuffer, (short)(0), id, (short)0, (short)2);
+        Util.arrayCopy(transientBuffer, (short)(2), date, (short)0, (short)4);
     }
 
     private void setPIN(APDU apdu){

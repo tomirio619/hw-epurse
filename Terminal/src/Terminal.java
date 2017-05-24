@@ -7,12 +7,6 @@ import javacard.security.KeyPair;
  */
 public class Terminal {
 
-    private KeyPair pair;
-    private ECPublicKey terminalPublicKey;
-    private ECPrivateKey terminalPrivateKey;
-
-    private ECPublicKey cardPublicKey;
-
     public static void main(String[] args) {
         TerminalThread terminalThread = new TerminalThread();
         new Thread(terminalThread).run();

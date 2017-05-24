@@ -1,4 +1,5 @@
 import javacard.framework.ISO7816;
+import javacard.framework.Util;
 import org.bouncycastle.util.encoders.Hex;
 
 import javax.smartcardio.*;
@@ -23,6 +24,10 @@ public class TerminalThread implements Runnable {
     private final static byte SEND_KEYPAIR_RSA = (byte) 0x45;
     private final static byte PERSONALIZATION_NEW_PIN = (byte) 0x32;
     private final static byte CREDIT_COMMIT_PIN = (byte) 0x38;
+    private final static byte PERSONALIZATION_HI = (byte) 0x30;
+    private final static byte PERSONALIZATION_DATES = (byte) 0x31;
+
+
 
 
     @Override
@@ -54,6 +59,8 @@ public class TerminalThread implements Runnable {
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
                             testPin(ch);
                             testSignatureRSA(ch);
+                            testPersonalizationHi(ch);
+                            testPesonalizationDates(ch);
                             //1. Terminal sends Hi
 //                            byte[] payload = new byte[2];
 //                            new SecureRandom().nextBytes(payload);
@@ -133,7 +140,7 @@ public class TerminalThread implements Runnable {
 
             try {
                 byte[] signedDataTerminal = responsePrivate.getData();
-                java.security.Signature signature = java.security.Signature.getInstance("SHA1withRSA", "BC");
+                Signature signature = Signature.getInstance("SHA1withRSA", "BC");
                 signature.initVerify(publickey);
                 signature.update(signedDataTerminal[0]);
                 boolean ifVerified = signature.verify(signedDataTerminal, (short) 1, (short) 128);
@@ -146,6 +153,44 @@ public class TerminalThread implements Runnable {
         } catch (Exception e) {
             e.printStackTrace();
         }
+
+
+    }
+
+    public void testPersonalizationHi(CardChannel ch) throws CardException, NoSuchAlgorithmException {
+        System.out.println("-----Test Personalization Hi-----");
+
+        KeyPairGenerator generator  = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(1024);
+        KeyPair keypair = generator.generateKeyPair();
+        RSAPublicKey cardPublickey = (RSAPublicKey) keypair.getPublic();
+        RSAPrivateKey cardPrivateKey = (RSAPrivateKey) keypair.getPrivate();
+
+        //byte [] nonceBytes = new byte[2];
+        //secureRandom.nextBytes(nonceBytes);
+
+        byte[] modulus = getBytes(cardPrivateKey.getModulus());
+        // Sending modulus private key
+        CommandAPDU capdu;
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 0, (byte) 0, modulus);
+        ResponseAPDU responsePrivate = ch.transmit(capdu);
+        System.out.println("PERSONALIZATION_HI private modulus: " + Integer.toHexString(responsePrivate.getSW()));
+
+        // Sending exponent private key
+        byte[] exponent = getBytes(cardPrivateKey.getPrivateExponent());
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 1, (byte) 0, exponent);
+        responsePrivate = ch.transmit(capdu);
+        System.out.println("PERSONALIZATION_HI private exponent: " + Integer.toHexString(responsePrivate.getSW()));
+
+        modulus = getBytes(cardPublickey.getModulus());
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 2, (byte) 0, modulus);
+        responsePrivate = ch.transmit(capdu);
+        System.out.println("PERSONALIZATION_HI public modulus: " + Integer.toHexString(responsePrivate.getSW()));
+
+        exponent = getBytes(cardPublickey.getPublicExponent());
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 3, (byte) 0, exponent);
+        responsePrivate = ch.transmit(capdu);
+        System.out.println("PERSONALIZATION_HI public exponent: " + Integer.toHexString(responsePrivate.getSW()));
 
 
     }
@@ -166,6 +211,43 @@ public class TerminalThread implements Runnable {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    private void testPesonalizationDates(CardChannel ch) throws CardException {
+
+        System.out.println("-----Test Personalization Dates-----");
+
+        // Get current date unix seconds
+        int unixTime = (int)(System.currentTimeMillis() / 1000);
+        byte[] personalizedDate = new byte[]{
+                (byte) (unixTime >> 24),
+                (byte) (unixTime >> 16),
+                (byte) (unixTime >> 8),
+                (byte) unixTime
+
+        };// convert date to byte array
+
+        // Create a random card ID
+        short randId = (short) ((double) 10000 * Math.random());
+        byte[] id = new byte[]{
+                (byte) (randId >> 8),
+                (byte) randId
+
+        };
+
+        short idUnido = Util.makeShort(id[0], id[1]);
+        // TODO check unique ID = " SELECT COUNT(*) as CN FROM CARD WHERE CARDID= (?)";
+
+        byte[] dataToSend = new byte[6];//container of data that will be sent to the card
+
+        Util.arrayCopy(id, (short)0, dataToSend, (short)0, (short)2); //copy card id to container
+        Util.arrayCopy(personalizedDate, (short)0, dataToSend, (short)2, (short)4);//copy date to container
+        //send data to the card
+        CommandAPDU capdu;
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_DATES, (byte) 0, (byte) 0, dataToSend);
+        ResponseAPDU responsePrivate = ch.transmit(capdu);
+        System.out.println("PERSONALIZATION_DATES: " + Integer.toHexString(responsePrivate.getSW()));
+
     }
 
     /**
