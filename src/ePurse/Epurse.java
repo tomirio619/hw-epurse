@@ -247,11 +247,11 @@ public class Epurse extends Applet implements ISO7816 {
     private void insKeypairPrivateRSA(APDU apdu) {
         boolean isModulus = headerBuffer[OFFSET_P1] == (byte) 0;
         if (isModulus) {
-            readBuffer(apdu, transientBuffer, (short) 0, headerBuffer[OFFSET_LC]);
-            privKey.setModulus(transientBuffer, (short) 0, headerBuffer[OFFSET_LC]);
+            readBuffer(apdu, transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
+            privKey.setModulus(transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
         } else {
-            readBuffer(apdu, transientBuffer, (short) 0, headerBuffer[OFFSET_LC]);
-            privKey.setExponent(transientBuffer, (short) 0, headerBuffer[OFFSET_LC]);
+            readBuffer(apdu, transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
+            privKey.setExponent(transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
         }
     }
 

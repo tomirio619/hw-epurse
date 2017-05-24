@@ -58,7 +58,7 @@ public class TerminalThread implements Runnable {
                             System.out.println(DatatypeConverter.printHexBinary(selectApplet.getBytes()));
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
                             testPin(ch);
-                            //testSignatureRSA(ch);
+                            testSignatureRSA(ch);
                             //1. Terminal sends Hi
 //                            byte[] payload = new byte[2];
 //                            new SecureRandom().nextBytes(payload);
@@ -119,17 +119,17 @@ public class TerminalThread implements Runnable {
             CommandAPDU capdu;
             capdu = new CommandAPDU(CLASS, SEND_KEYPAIR_RSA, (byte) 0, (byte) 0, modulus);
             ResponseAPDU responsePrivate = ch.transmit(capdu);
-            System.out.println("SEND_KEYPAIR modulus: " + responsePrivate.getSW());
+            System.out.println("SEND_KEYPAIR modulus: " + Integer.toHexString(responsePrivate.getSW()));
 
 
             byte[] exponent = getBytes(privatekey.getPrivateExponent());
             capdu = new CommandAPDU(CLASS, SEND_KEYPAIR_RSA, (byte) 1, (byte) 0, exponent);
             responsePrivate = ch.transmit(capdu);
-            System.out.println("SEND_KEYPAIR exponent: " + responsePrivate.getSW());
+            System.out.println("SEND_KEYPAIR exponent: " + Integer.toHexString(responsePrivate.getSW()));
 
             capdu = new CommandAPDU(CLASS, SEND_KEYPAIR, (byte) 0, (byte) 0, 0);
             responsePrivate = ch.transmit(capdu);
-            System.out.println("SIGNING Request: " + responsePrivate.getSW());
+            System.out.println("SIGNING Request: " + Integer.toHexString(responsePrivate.getSW()));
 
             byte[] data = {(byte) 42};
             javacard.security.Signature signature = Signature.getInstance(Signature.ALG_RSA_SHA_PKCS1, false);
