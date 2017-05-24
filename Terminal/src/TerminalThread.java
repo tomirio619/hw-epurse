@@ -1,7 +1,4 @@
-import com.sun.prism.PixelFormat;
 import javacard.framework.ISO7816;
-import javacard.security.*;
-import javacard.security.Signature;
 import org.bouncycastle.util.encoders.Hex;
 
 import javax.smartcardio.*;
@@ -12,8 +9,6 @@ import java.security.KeyPair;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.List;
-
-import ePurse.Epurse;
 
 
 /**
@@ -92,6 +87,9 @@ public class TerminalThread implements Runnable {
 
     private void testSignatureRSA(CardChannel ch) {
 
+        System.out.println("-----Test signature RSA-----");
+
+
         RSAPublicKey publickey = null;
 
         RSAPrivateKey privatekey = null;
@@ -132,16 +130,18 @@ public class TerminalThread implements Runnable {
             System.out.println("SIGNING Request: " + Integer.toHexString(responsePrivate.getSW()));
 
             byte[] data = {(byte) 42};
-            javacard.security.Signature signature = Signature.getInstance(Signature.ALG_RSA_SHA_PKCS1, false);
 
-            javacard.security.RSAPublicKey pkey = (javacard.security.RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC, KeyBuilder.LENGTH_RSA_1024, false);
-            pkey.setExponent(publickey.getPublicExponent().toByteArray(), (short) 0, (short) publickey.getPublicExponent().toByteArray().length);
-            pkey.setModulus(publickey.getModulus().toByteArray(), (short) 0, (short) publickey.getModulus().toByteArray().length);
+            try {
+                byte[] signedDataTerminal = responsePrivate.getData();
+                java.security.Signature signature = java.security.Signature.getInstance("SHA1withRSA", "BC");
+                signature.initVerify(publickey);
+                signature.update(signedDataTerminal[0]);
+                boolean ifVerified = signature.verify(signedDataTerminal, (short) 1, (short) 128);
+                System.out.println("Verification " +ifVerified);
+            }catch (Exception e){
+                e.printStackTrace();
+            }
 
-            signature.init(pkey, Signature.MODE_VERIFY);
-            System.out.println(DatatypeConverter.printHexBinary(responsePrivate.getData()));
-            boolean correct = signature.verify(responsePrivate.getData(), (short) 0, (short) 1, responsePrivate.getData(), (short) 1, (short) (responsePrivate.getData().length - 1));
-            System.out.println(correct);
 
         } catch (Exception e) {
             e.printStackTrace();

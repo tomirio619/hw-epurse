@@ -74,6 +74,9 @@ public class Epurse extends Applet implements ISO7816 {
     private OwnerPIN pin;
     private final static byte PIN_LENGTH = (byte) 4;
 
+    private byte status;
+
+
 
     /**
      * Constructor
@@ -87,6 +90,9 @@ public class Epurse extends Applet implements ISO7816 {
                 KeyBuilder.LENGTH_RSA_1024, false);
         signingKey = Signature.getInstance(KeyPair.ALG_RSA, false);
         pin = new OwnerPIN((byte)3, (byte)4);
+
+        status = STATE_RAW;
+
 
         register();
     }
@@ -320,6 +326,35 @@ public class Epurse extends Applet implements ISO7816 {
         apdu.setOutgoingLength((short) 2);
         apdu.sendBytesLong(transientBuffer, (short) 0, (short) (3 + signatureSize));
 
+    }
+
+    private void processPersonalizationHi(APDU apdu) {
+        if(status==STATE_RAW){
+
+
+            byte keyValue = headerBuffer[OFFSET_P1];
+            switch (keyValue){
+                case 0:
+                    readBuffer(apdu, transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
+                    privKey.setModulus(transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
+                    ISOException.throwIt((short)10);
+
+                    break;
+                case 1:
+                    readBuffer(apdu, transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
+                    privKey.setExponent(transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
+                    break;
+                case 2:
+                    readBuffer(apdu, transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
+                    pubKey.setModulus(transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
+                    break;
+                case 3:
+                    readBuffer(apdu, transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
+                    pubKey.setExponent(transientBuffer, (short) 0, (short)(headerBuffer[OFFSET_LC]& 0x00FF));
+                    break;
+            }
+
+        }
     }
 
     private void setPIN(APDU apdu){
