@@ -27,6 +27,12 @@ public class TerminalThread implements Runnable {
     private final static byte PERSONALIZATION_HI = (byte) 0x30;
     private final static byte PERSONALIZATION_DATES = (byte) 0x31;
 
+    private final static byte VERIFICATION_V = (byte) 0x42;
+    private final static byte VERIFICATION_S = (byte) 0x47;
+
+    private final static byte BACKEND_KEY = (byte) 0x46;
+
+
 
 
 
@@ -57,10 +63,15 @@ public class TerminalThread implements Runnable {
                             ResponseAPDU response = ch.transmit(selectApplet);
                             System.out.println(DatatypeConverter.printHexBinary(selectApplet.getBytes()));
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
-                            testPin(ch);
+
                             testSignatureRSA(ch);
-                            testPersonalizationHi(ch);
-                            testPesonalizationDates(ch);
+
+                            //testPersonalizationHi(ch);
+                            //testPesonalizationDates(ch);
+                            //testPin(ch);
+
+                            testTerminalAuth(ch);
+
                             //1. Terminal sends Hi
 //                            byte[] payload = new byte[2];
 //                            new SecureRandom().nextBytes(payload);
@@ -90,6 +101,64 @@ public class TerminalThread implements Runnable {
         } catch (CardException e) {
             System.err.println("Card status problem!");
         }
+    }
+
+    // the key components and the signature dont fit in an apdu, the idea is send this component
+    // firts and then signature of both, modulus and exponent
+    public void testTerminalAuth(CardChannel ch) throws NoSuchProviderException, NoSuchAlgorithmException, InvalidKeyException, CardException {
+
+        //First generate test terminal keypair
+        KeyPairGenerator g = KeyPairGenerator.getInstance("RSA", "BC");
+        g.initialize(1024, new SecureRandom());
+        java.security.KeyPair pairT = g.generateKeyPair();
+        RSAPublicKey publicKey = (RSAPublicKey) pairT.getPublic();
+        byte[] exponentBytes = getBytes(publicKey.getPublicExponent());
+        byte[] modulusBytes = getBytes(publicKey.getModulus());
+
+        //Generate BE keys
+        g.initialize(1024, new SecureRandom());
+        java.security.KeyPair pairB = g.generateKeyPair();
+        RSAPrivateKey privateKeyBE = (RSAPrivateKey) pairB.getPrivate();
+        RSAPublicKey publicKeyBE = (RSAPublicKey) pairB.getPublic();
+
+        //Sign the public key of the terminal
+        byte[] bytesKeyTerm = new byte [modulusBytes.length+exponentBytes.length];
+        Util.arrayCopy(modulusBytes,(short)0,bytesKeyTerm,(short)0,(short)modulusBytes.length);
+        Util.arrayCopy(exponentBytes,(short)0,bytesKeyTerm,(short)modulusBytes.length,(short)exponentBytes.length);
+
+        // This is the signature of the BackEnd
+        byte[] signedKeyTerm = null;
+        try {
+            Signature signature = Signature.getInstance("SHA1withRSA", "BC");
+            signature.initSign(privateKeyBE);
+            signature.update(bytesKeyTerm,0,bytesKeyTerm.length);
+            signedKeyTerm = signature.sign();
+            int lenghtSig = signedKeyTerm.length;
+
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+
+        // Send BE key for verify signatures(this will be done in the personalization)
+        byte[] exponentBytesBE = getBytes(publicKeyBE.getPublicExponent());
+        byte[] modulusBytesBE = getBytes(publicKeyBE.getModulus());
+        byte[] bytesKeyBE = new byte [modulusBytesBE.length+exponentBytesBE.length];
+        Util.arrayCopy(exponentBytesBE,(short)0,bytesKeyBE,(short)0,(short)exponentBytesBE.length);
+        Util.arrayCopy(modulusBytesBE,(short)0,bytesKeyBE,(short)exponentBytesBE.length,(short)modulusBytesBE.length);
+        CommandAPDU capdu;
+        capdu = new CommandAPDU(CLASS, BACKEND_KEY, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyBE);
+        ResponseAPDU responsePrivate = ch.transmit(capdu);
+        System.out.println("BACKEND_KEY: " + Integer.toHexString(responsePrivate.getSW()));
+
+        // Send public key of the terminal
+        capdu = new CommandAPDU(CLASS, VERIFICATION_V, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyTerm);
+        responsePrivate = ch.transmit(capdu);
+        System.out.println("VERIFICATION_V: " + Integer.toHexString(responsePrivate.getSW()));
+
+        // Send public key of the terminal signed
+        capdu = new CommandAPDU(CLASS, VERIFICATION_S, (byte) 0, (byte) 0, signedKeyTerm);
+        responsePrivate = ch.transmit(capdu);
+        System.out.println("VERIFICATION_S: " + Integer.toHexString(responsePrivate.getSW()));
     }
 
     private void testSignatureRSA(CardChannel ch) {

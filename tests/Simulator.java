@@ -9,6 +9,7 @@ import javacard.security.*;
 import junit.framework.TestCase;
 import org.bouncycastle.util.encoders.Hex;
 import org.junit.BeforeClass;
+import sun.security.rsa.RSAPrivateKeyImpl;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
@@ -20,6 +21,7 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.security.*;
 import java.security.KeyPair;
+import java.security.MessageDigest;
 import java.security.Signature;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
@@ -30,6 +32,8 @@ import java.util.List;
  * See https://github.com/licel/jcardsim/tree/jc2.2.1
  */
 public class Simulator extends TestCase {
+
+
 
     private static final String APPLET_AID = "a0404142434445461001";
     private static final byte CLASS = (byte) 0xB0;
@@ -51,10 +55,14 @@ public class Simulator extends TestCase {
 
     private final static byte VERIFICATION_HI = (byte) 0x41;
     private final static byte VERIFICATION_V = (byte) 0x42;
+    private final static byte VERIFICATION_S = (byte) 0x47;
+
     private final static byte SEND_DECRYPTIONKEY = (byte) 0x44;
 
     private final static byte SEND_KEYPAIR = (byte) 0x43;
     private final static byte SEND_KEYPAIR_RSA = (byte) 0x45;
+    private final static byte BACKEND_KEY = (byte) 0x46;
+
 
     private static boolean setUpIsDone = false;
     private static CardChannel cardChannel = null;
@@ -119,7 +127,6 @@ public class Simulator extends TestCase {
     public void testSignatureRSA() {
 
         RSAPublicKey publickey = null;
-
         RSAPrivateKey privatekey = null;
 
         /* Generate keypair. */
@@ -166,6 +173,65 @@ public class Simulator extends TestCase {
         } catch (Exception e) {
 
         }
+
+    }
+
+    // the key components and the signature dont fit in an apdu, the idea is send this component
+    // firts and then signature of both, modulus and exponent
+    public void testTerminalAuth() throws NoSuchProviderException, NoSuchAlgorithmException, InvalidKeyException {
+
+        //First generate test terminal keypair
+        KeyPairGenerator g = KeyPairGenerator.getInstance("RSA", "BC");
+        g.initialize(1024, new SecureRandom());
+        java.security.KeyPair pairT = g.generateKeyPair();
+        RSAPublicKey publicKey = (RSAPublicKey) pairT.getPublic();
+        byte[] exponentBytes = getBytes(publicKey.getPublicExponent());
+        byte[] modulusBytes = getBytes(publicKey.getModulus());
+
+        //Generate BE keys
+        g.initialize(1024, new SecureRandom());
+        java.security.KeyPair pairB = g.generateKeyPair();
+        RSAPrivateKey privateKeyBE = (RSAPrivateKey) pairB.getPrivate();
+        RSAPublicKey publicKeyBE = (RSAPublicKey) pairB.getPublic();
+
+        //Sign the public key of the terminal
+        byte[] bytesKeyTerm = new byte [modulusBytes.length+exponentBytes.length];
+        Util.arrayCopy(modulusBytes,(short)0,bytesKeyTerm,(short)0,(short)modulusBytes.length);
+        Util.arrayCopy(exponentBytes,(short)0,bytesKeyTerm,(short)modulusBytes.length,(short)exponentBytes.length);
+
+        // This is the signature of the BackEnd
+        byte[] signedKeyTerm = null;
+        try {
+            Signature signature = Signature.getInstance("SHA1withRSA", "BC");
+            signature.initSign(privateKeyBE);
+            signature.update(bytesKeyTerm,0,bytesKeyTerm.length);
+            signedKeyTerm = signature.sign();
+            int lenghtSig = signedKeyTerm.length;
+
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+
+        // Send BE key for verify signatures(this will be done in the personalization)
+        byte[] exponentBytesBE = getBytes(publicKeyBE.getPublicExponent());
+        byte[] modulusBytesBE = getBytes(publicKeyBE.getModulus());
+        byte[] bytesKeyBE = new byte [modulusBytesBE.length+exponentBytesBE.length];
+        Util.arrayCopy(exponentBytesBE,(short)0,bytesKeyBE,(short)0,(short)exponentBytesBE.length);
+        Util.arrayCopy(modulusBytesBE,(short)0,bytesKeyBE,(short)exponentBytesBE.length,(short)modulusBytesBE.length);
+        CommandAPDU capdu;
+        capdu = new CommandAPDU(CLASS, BACKEND_KEY, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyBE);
+        ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
+        System.out.println("BACKEND_KEY: " + Integer.toHexString(responsePrivate.getSW()));
+
+        // Send public key of the terminal
+        capdu = new CommandAPDU(CLASS, VERIFICATION_V, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyTerm);
+        responsePrivate = simulator.transmitCommand(capdu);
+        System.out.println("VERIFICATION_V: " + Integer.toHexString(responsePrivate.getSW()));
+
+        // Send public key of the terminal signed
+        capdu = new CommandAPDU(CLASS, VERIFICATION_S, (byte) 0, (byte) 0, signedKeyTerm);
+        responsePrivate = simulator.transmitCommand(capdu);
+        System.out.println("VERIFICATION_S: " + Integer.toHexString(responsePrivate.getSW()));
 
     }
 
