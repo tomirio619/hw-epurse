@@ -53,6 +53,8 @@ public class Epurse extends Applet implements ISO7816 {
     /** wrong terminal nonce */
     final static short SW_WRONG_NONCE = 0x6304;
 
+    final static short SW_NO_MORE_PIN_ATTEMPTS = 0x6305;
+
 
 
     /**
@@ -113,8 +115,8 @@ public class Epurse extends Applet implements ISO7816 {
     private final static byte DATE_LENGTH = (byte) 8;
 
     private byte[] id = new byte[2];
-    private byte[] date = new byte[8];
-    private byte[] expirationDate = new byte[8];
+    private byte[] date = new byte[4];
+    private byte[] expirationDate = new byte[4];
     private byte[] amount = new byte[2];
 
     byte[] lastNonce;
@@ -199,12 +201,12 @@ public class Epurse extends Applet implements ISO7816 {
      * @param lsb    The least significant byte of the short
      * @param offset from which index it should write the random number to the transcient buffer
      */
-    private void incrementNumberStoreAndCheck(byte msb, byte lsb, short offset) {
+    private void incrementNumberStoreAndCheck(byte msb, byte lsb, short offset, short increment) {
 
         short lastNumber = Util.makeShort(lastNonce[0], lastNonce[1]);
         short number = Util.makeShort(msb, lsb);
 
-        if((short)(lastNumber+1) != number) ISOException.throwIt(SW_WRONG_NONCE);
+        if((short)(lastNumber+increment) != number) ISOException.throwIt(SW_WRONG_NONCE);
 
         number += 1;
         transientBuffer[offset] = (byte) (number >> 8);
@@ -299,6 +301,7 @@ public class Epurse extends Applet implements ISO7816 {
                         break;
                     case VERIFICATION_S:
                         processVerificationSignature(apdu);
+                        // Safe state term verified
                         sessionStatus[0]=TERMINAL_AUTH;
                         break;
                     default:
@@ -340,6 +343,7 @@ public class Epurse extends Applet implements ISO7816 {
                         break;
                     case RELOADING_UPDATE:
                         processReloadingUpdate(apdu);
+                        break;
 
                         //Crediting APDUs:
                     case CREDIT_HI:
@@ -347,12 +351,11 @@ public class Epurse extends Applet implements ISO7816 {
                         break;
                     case CREDIT_COMMIT_PIN:
                         checkPIN(apdu);
+                        processCommitPayment(apdu);
                         break;
-                    //TODO:
                     case CREDIT_COMMIT_NO_PIN:
-                        //TODO:
-                    case CREDIT_NEW_BALANCE:
-                        //TODO:
+                        processCommitPayment(apdu);
+                        break;
                     default:
                         throw new ISOException(SW_INS_NOT_SUPPORTED);
                 }
@@ -400,7 +403,7 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
     /**
-     * Save termporarily the public key of the terminal
+     * Save temporarily the public key of the terminal
      *
      * @param apdu
      */
@@ -426,15 +429,16 @@ public class Epurse extends Applet implements ISO7816 {
         short datalength = (short) (headerBuffer[OFFSET_LC] & 0x00FF);
         readBuffer(apdu, transientBuffer, (short) 0, datalength);
 
-
-        // get teminal key data stored
+        // Get teminal key data stored
         byte[] bytesTermKeyStored = new byte[128 + 3];
         terminalKey.getExponent(bytesTermKeyStored, (short) 0);
         terminalKey.getModulus(bytesTermKeyStored, (short) 3);
 
-        // verify with received sign
+        // TODO: Build original signed message with the public key of the card [NONCE,PKC, PKT]
+
+
+        //TODO: verify [NONCE,PKC, PKT] with received sign
         boolean isVerified = verify(bytesTermKeyStored, (short) 0, (short) 131, transientBuffer, (short) 0, (short) 128, backEndKey);
-        // TODO:Safe state term verifien somewhere
         if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);
     }
 
@@ -572,20 +576,50 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
     private void checkPIN(APDU apdu) {
-        if (headerBuffer[OFFSET_LC] > PIN_LENGTH)
-            ISOException.throwIt(ISO7816.SW_WRONG_DATA);
-        else
-            readBuffer(apdu, transientBuffer, (short) 0, headerBuffer[OFFSET_LC]);
-        if (!pin.check(transientBuffer, (short) 0, PIN_LENGTH))
+        readBuffer(apdu, transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
+        if (pin.getTriesRemaining() <= 0x00){
+            ISOException.throwIt(SW_NO_MORE_PIN_ATTEMPTS);
+        }
+
+        if (!pin.check(transientBuffer, (short) 6, PIN_LENGTH))
             ISOException.throwIt(SW_VERIFICATION_FAILED);
 
 
     }
 
+    private void processCommitPayment(APDU apdu){
+        // Verify nonce
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)2);
+
+        //Get new balance
+        Util.arrayCopy(transientBuffer, (short) 4, amount, (short) 0, (short) 2);
+
+        Util.arrayCopy(id, (short) 0, transientBuffer, (short) 4, (short) 2);
+        //datalength = (short) (datalength + 2);
+
+        short signatureSize = sign(transientBuffer, (short) 0, (short)6, transientBuffer, (short)6);
+
+        //Send the response
+        apdu.setOutgoing();
+        apdu.setOutgoingLength((short) (6 + signatureSize));
+        apdu.sendBytesLong(transientBuffer, (short) 0, (short) (6 + signatureSize));
+    }
+
     private void processDecommissioningClear(APDU apdu) {
         readBuffer(apdu, transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
-        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0);
-        //TODO verify terminal signature
+
+        // Verify with received signature
+        boolean isVerified = verify(transientBuffer, (short) 0, (short) 4, transientBuffer, (short) 4, (short) 128, terminalKey);
+        // If signature verification not verified throw exception
+        if (!isVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+
+        // Verify id
+        if (Util.arrayCompare(id, (short) 0, transientBuffer, (short) 2, (short) 2) != 0x00) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+
+        // Verify nonce
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)2);
+
+
     }
 
     /**
@@ -603,10 +637,14 @@ public class Epurse extends Applet implements ISO7816 {
         // If signature verification not verified throw exception
         if (!isVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
-        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0);
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)2);
+
+        // Verify id
+        if (Util.arrayCompare(id, (short) 0, transientBuffer, (short) 2, (short) 2) != 0x00) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+
 
         // Store new amount
-        Util.arrayCopy(transientBuffer, NONCE_LENGTH, amount, (short)0, AMOUNT_LENGTH);
+        Util.arrayCopy(transientBuffer, (short) (NONCE_LENGTH+ID_LENGTH), amount, (short)0, AMOUNT_LENGTH);
     }
 
 

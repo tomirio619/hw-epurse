@@ -11,8 +11,9 @@ import java.security.interfaces.RSAPublicKey;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.RSAPrivateKeySpec;
 import java.security.spec.RSAPublicKeySpec;
+import java.util.Arrays;
 import java.util.List;
-
+import java.util.Scanner;
 
 
 /**
@@ -27,7 +28,6 @@ public class Terminal {
     private final static byte SEND_KEYPAIR = (byte) 0x43;
     private final static byte SEND_KEYPAIR_RSA = (byte) 0x45;
     private final static byte PERSONALIZATION_NEW_PIN = (byte) 0x32;
-    private final static byte CREDIT_COMMIT_PIN = (byte) 0x38;
     private final static byte PERSONALIZATION_HI = (byte) 0x30;
     private final static byte PERSONALIZATION_DATES = (byte) 0x31;
     private final static byte VERIFICATION_V = (byte) 0x42;
@@ -35,6 +35,14 @@ public class Terminal {
     private final static byte BACKEND_KEY = (byte) 0x46;
     private final static byte DECOMMISSIONING_HI = (byte) 0x33;
     private final static byte DECOMMISSIONING_CLEAR = (byte) 0x34;
+
+    private final static byte RELOADING_HI = (byte) 0x35;
+    private final static byte RELOADING_UPDATE = (byte) 0x36;
+
+    private final static byte CREDIT_HI = (byte) 0x37;
+    private final static byte CREDIT_COMMIT_PIN = (byte) 0x38;
+    private final static byte CREDIT_COMMIT_NO_PIN = (byte) 0x39;
+    private final static byte CREDIT_NEW_BALANCE = (byte) 0x40;
 
 
     private RSAPublicKey publicKeyBackend;
@@ -61,8 +69,6 @@ public class Terminal {
     }
 
     void loadBackendKeys()   {
-
-
 
         // Load the key into BigIntegers
         BigInteger modulus = new BigInteger(BackendKeys.privateModulusBackend, 16);
@@ -140,7 +146,10 @@ public class Terminal {
 
                                 testTerminalAuth(ch);
 
-                                testDecommissioning(ch);
+                                testReloading(ch);
+
+                                testCrediting(ch);
+                                //testDecommissioning(ch);
                                 //testSignatureRSA(ch);
 
 
@@ -161,6 +170,7 @@ public class Terminal {
 //                            System.out.println(incremented);
 
                             } catch (Exception e) {
+                                e.printStackTrace();
                             }
                             card.disconnect(false);
 
@@ -177,6 +187,8 @@ public class Terminal {
                 System.err.println("Card status problem!");
             }
         }
+
+
 
 
         // Send all step personalization
@@ -201,15 +213,16 @@ public class Terminal {
             ResponseAPDU responseAPDU = ch.transmit(hiAPDU);
             System.out.println("VERIFICATION_HI: " + Integer.toHexString(responseAPDU.getSW()));
 
+            byte [] ca = responseAPDU.getData(); // Data Ca{Ca}SKC
+            //TODO: check nonce and send to the backend Ca,TA {TA, {Ca}SKC}SKT
 
-            //Sign the public key of the terminal
+            //Sign the public key of the terminal (this id done in the backend)
             byte[] exponentBytes = getBytes(publicKeyTerminal.getPublicExponent());
             byte[] modulusBytes = getBytes(publicKeyTerminal.getModulus());
             byte[] bytesKeyTerm = new byte [modulusBytes.length+exponentBytes.length];
             Util.arrayCopy(exponentBytes,(short)0,bytesKeyTerm,(short)0,(short)exponentBytes.length);
             Util.arrayCopy(modulusBytes,(short)0,bytesKeyTerm,(short)exponentBytes.length,(short)modulusBytes.length);
 
-            // This is the signature of the BackEnd
             byte[] signedKeyTerm = null;
             int lenghtSig=0;
             try {
@@ -224,15 +237,16 @@ public class Terminal {
             }
 
 
+            //TODO: receive V from the backend and split it in two part (plaintext and signature),
             CommandAPDU capdu;
             ResponseAPDU responsePrivate;
 
-            // Send public key of the terminal
+            // Send public key of the terminal extrated from the plaintext
             capdu = new CommandAPDU(CLASS, VERIFICATION_V, (byte) exponentBytes.length, (byte) modulusBytes.length, bytesKeyTerm);
             responsePrivate = ch.transmit(capdu);
             System.out.println("VERIFICATION_V: " + Integer.toHexString(responsePrivate.getSW()));
 
-            // Send public key of the terminal signed
+            // Send the signature
             capdu = new CommandAPDU(CLASS, VERIFICATION_S, (byte) 0, (byte) 0, signedKeyTerm);
             responsePrivate = ch.transmit(capdu);
             System.out.println("VERIFICATION_S: " + Integer.toHexString(responsePrivate.getSW()));
@@ -301,6 +315,8 @@ public class Terminal {
 
             };// convert date to byte array
 
+            //TODO: generate and experiation date and send it to backend and card
+
             // Create a random card ID
             short randId = (short) ((double) 10000 * Math.random());
             byte[] id = new byte[]{
@@ -331,7 +347,7 @@ public class Terminal {
                 CommandAPDU capdu;
                 capdu = new CommandAPDU(CLASS, PERSONALIZATION_NEW_PIN, (byte) 0, (byte) 0, pin);
                 ResponseAPDU responsePrivate = ch.transmit(capdu);
-                System.out.println("Set pin: " + Integer.toHexString(responsePrivate.getSW()));
+                System.out.println("PERSONALIZATION_NEW_PIN: " + Integer.toHexString(responsePrivate.getSW()));
 
                 //capdu = new CommandAPDU(CLASS, CREDIT_COMMIT_PIN, (byte) 0, (byte) 0, pin);
                 //responsePrivate = ch.transmit(capdu);
@@ -374,16 +390,37 @@ public class Terminal {
             //TODO verify signature, send info backend
             byte [] dataRec = responseAPDU.getData();
             short nonce = Util.makeShort(dataRec[0], dataRec[1]);
-            nonce = (short) (nonce+1);
+            // +2 due to the backend increment algo the nonce
+            nonce = (short) (nonce+2);
             short id = Util.makeShort(dataRec[2], dataRec[3]);
 
             byte [] dataToSend = new byte[]{
                     (byte) (nonce >> 8),
-                    (byte) nonce
+                    (byte) nonce,
+                    (byte) (id >> 8),
+                    (byte) id
 
             };
 
-            hiAPDU = new CommandAPDU(CLASS, DECOMMISSIONING_CLEAR, 0, 0, dataToSend, dataToSend.length);
+            //TODO sign with terminla key
+            byte[] signdeBytes = null;
+            try {
+                Signature signature = Signature.getInstance("SHA1withRSA", "BC");
+                signature.initSign(privateKeyTerminal);
+                signature.update(dataToSend,0,dataToSend.length);
+                signdeBytes = signature.sign();
+
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+
+            byte [] bytesApdu = new byte[128+4];
+            System.arraycopy(dataToSend,0, bytesApdu,0,4);
+            System.arraycopy(signdeBytes,0, bytesApdu,4,128);
+
+
+
+            hiAPDU = new CommandAPDU(CLASS, DECOMMISSIONING_CLEAR, 0, 0, bytesApdu, bytesApdu.length);
             responseAPDU = ch.transmit(hiAPDU);
             System.out.println("DECOMMISSIONING_CLEAR: " + Integer.toHexString(responseAPDU.getSW()));
 
@@ -391,6 +428,200 @@ public class Terminal {
 
         }
 
+
+        private void testReloading(CardChannel ch) throws CardException {
+            System.out.println("-----Test Reloading-----");
+
+            byte [] nonceBytes = new byte[2];
+            secureRandom.nextBytes(nonceBytes);
+            short firstShort = Util.makeShort(nonceBytes[0], nonceBytes[1]);
+
+            // This is the signature of the Terminal
+            byte[] signedNonce = null;
+            try {
+                Signature signature = Signature.getInstance("SHA1withRSA", "BC");
+                signature.initSign(privateKeyTerminal);
+                signature.update(nonceBytes,0,nonceBytes.length);
+                signedNonce = signature.sign();
+
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+            byte[] combinedData = new byte[nonceBytes.length + signedNonce.length];
+
+            System.arraycopy(nonceBytes,0,combinedData,0         ,nonceBytes.length);
+            System.arraycopy(signedNonce,0,combinedData,nonceBytes.length,signedNonce.length);
+
+
+            CommandAPDU hiAPDU = new CommandAPDU(CLASS, RELOADING_HI, 0, 0, combinedData, combinedData.length);
+            ResponseAPDU responseAPDU = ch.transmit(hiAPDU);
+            System.out.println("RELOADING_HI: " + Integer.toHexString(responseAPDU.getSW()));
+
+            //TODO verify signature, send info backend and forward everything to the backend
+
+            byte [] dataRec = responseAPDU.getData();
+            short nonce = Util.makeShort(dataRec[0], dataRec[1]);
+            // +2 due to the backend increment algo the nonce
+            nonce = (short) (nonce+2);
+            short id = Util.makeShort(dataRec[2], dataRec[3]);
+
+            //TODO: get correct balance from the backend and increment it with the amount introduced
+            short amount = 90;
+
+            byte [] dataToSend = new byte[]{
+                    (byte) (nonce >> 8),
+                    (byte) nonce,
+                    (byte) (id >> 8),
+                    (byte) id,
+                    (byte) (amount >> 8),
+                    (byte) amount
+
+            };
+
+            //TODO sign with terminla key
+            byte[] signdeBytes = null;
+            try {
+                Signature signature = Signature.getInstance("SHA1withRSA", "BC");
+                signature.initSign(privateKeyTerminal);
+                signature.update(dataToSend,0,dataToSend.length);
+                signdeBytes = signature.sign();
+
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+
+            byte [] bytesApdu = new byte[128+6];
+            System.arraycopy(dataToSend,0, bytesApdu,0,6);
+            System.arraycopy(signdeBytes,0, bytesApdu,6,128);
+
+
+
+            hiAPDU = new CommandAPDU(CLASS, RELOADING_UPDATE, 0, 0, bytesApdu, bytesApdu.length);
+            responseAPDU = ch.transmit(hiAPDU);
+            System.out.println("RELOADING_UPDATE: " + Integer.toHexString(responseAPDU.getSW()));
+            System.out.println("Response: " + DatatypeConverter.printHexBinary(responseAPDU.getData()));
+
+
+
+
+        }
+
+        private void testCrediting(CardChannel ch) throws CardException {
+
+            System.out.println("-----Test Crediting-----");
+
+            byte [] nonceBytes = new byte[2];
+            secureRandom.nextBytes(nonceBytes);
+            short firstShort = Util.makeShort(nonceBytes[0], nonceBytes[1]);
+
+            // This is the signature of the Terminal
+            byte[] signedNonce = null;
+            try {
+                Signature signature = Signature.getInstance("SHA1withRSA", "BC");
+                signature.initSign(privateKeyTerminal);
+                signature.update(nonceBytes,0,nonceBytes.length);
+                signedNonce = signature.sign();
+
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+            byte[] combinedData = new byte[nonceBytes.length + signedNonce.length];
+
+            System.arraycopy(nonceBytes,0,combinedData,0         ,nonceBytes.length);
+            System.arraycopy(signedNonce,0,combinedData,nonceBytes.length,signedNonce.length);
+
+
+            CommandAPDU hiAPDU = new CommandAPDU(CLASS, CREDIT_HI, 0, 0, combinedData, combinedData.length);
+            ResponseAPDU responseAPDU = ch.transmit(hiAPDU);
+            System.out.println("CREDIT_HI: " + Integer.toHexString(responseAPDU.getSW()));
+
+            //TODO verify signature, get correct balance from the backend
+            short receivedBalance = 50;
+            short testAmount = 21;
+
+            if(receivedBalance-testAmount < 0){
+                System.out.println("Error negative balance");
+                return;
+            }
+
+            byte [] dataRec = responseAPDU.getData();
+            short nonce = Util.makeShort(dataRec[0], dataRec[1]);
+            // +2 due to the backend increment algo the nonce
+            nonce = (short) (nonce+2);
+            short id = Util.makeShort(dataRec[2], dataRec[3]);
+            short newBalance = (short) (receivedBalance - testAmount);
+
+            byte[] dataToSend = null;
+            byte instruction;
+
+            if(testAmount>20){
+                Scanner scanner = new Scanner(System.in);
+                byte[] pinArray = new byte[4];
+                String pin = scanner.next();
+
+                for (int i = 0 ; i < pin.length(); i++){
+                    pinArray[i] = (byte)  (pin.charAt(i) - 48);
+                }
+
+                instruction = CREDIT_COMMIT_PIN;
+
+                dataToSend = new byte[]{
+                        (byte) (nonce >> 8),
+                        (byte) nonce,
+                        (byte) (testAmount >> 8),
+                        (byte) testAmount,
+                        (byte) (newBalance >> 8),
+                        (byte) newBalance,
+                        pinArray[0],
+                        pinArray[1],
+                        pinArray[2],
+                        pinArray[3],
+                };
+
+
+            }else{
+                instruction = CREDIT_COMMIT_NO_PIN;
+
+                dataToSend = new byte[]{
+                        (byte) (nonce >> 8),
+                        (byte) nonce,
+                        (byte) (testAmount >> 8),
+                        (byte) testAmount,
+                        (byte) (newBalance >> 8),
+                        (byte) newBalance,
+                };
+            }
+
+            //TODO: get correct balance from the backend and increment it with the amount introduced
+            short amount = 90;
+
+            System.out.println(DatatypeConverter.printHexBinary(dataToSend));
+
+            //TODO sign with terminla key
+            byte[] signdeBytes = null;
+            try {
+                Signature signature = Signature.getInstance("SHA1withRSA", "BC");
+                signature.initSign(privateKeyTerminal);
+                signature.update(dataToSend,0,dataToSend.length);
+                signdeBytes = signature.sign();
+
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+
+            byte [] bytesApdu = new byte[128+dataToSend.length];
+            System.arraycopy(dataToSend,0, bytesApdu,0,dataToSend.length);
+            System.arraycopy(signdeBytes,0, bytesApdu,dataToSend.length,128);
+
+
+            hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, bytesApdu, bytesApdu.length);
+            responseAPDU = ch.transmit(hiAPDU);
+            System.out.println("CREDITING_UPDATE: " + Integer.toHexString(responseAPDU.getSW()));
+            System.out.println("Response: " + DatatypeConverter.printHexBinary(responseAPDU.getData()));
+
+
+
+        }
 
 
         /**
