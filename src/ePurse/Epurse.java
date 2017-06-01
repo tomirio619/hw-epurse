@@ -48,6 +48,12 @@ public class Epurse extends Applet implements ISO7816 {
 
     final static short SW_TERMINAL_VERIFICATION_FAILED = 0x6302;
 
+    final static short SW_CARD_BLOCKED = 0x6303;
+
+    /** wrong terminal nonce */
+    final static short SW_WRONG_NONCE = 0x6304;
+
+
 
     /**
      * State bytes
@@ -55,7 +61,13 @@ public class Epurse extends Applet implements ISO7816 {
     private final static byte STATE_RAW = 0;
     //private final static byte STATE_INITIALIZED = 1;
     private final static byte STATE_PERSONALIZED = 1;
-    private final static byte STATE_DECOMISIONED = 2;
+    private final static byte STATE_DECOMMISSIONED = 2;
+
+    /**
+     * State bytes for session
+     */
+    private final static byte TERMINAL_NO_AUTH = 0;
+    private final static byte TERMINAL_AUTH = 1;
 
 
     /**
@@ -86,13 +98,26 @@ public class Epurse extends Applet implements ISO7816 {
     private OwnerPIN pin;
     private final static byte PIN_LENGTH = (byte) 4;
 
+    /**
+     * The applet state (RAW, PERSONALIZED or DECOMMISSIONED).
+     */
     private byte status;
-    private byte sessionStatus;
+    /**
+     * The communication state (auth or not)
+     */
+    byte[] sessionStatus;
+
+    private final static byte ID_LENGTH = (byte) 2;
+    private final static byte NONCE_LENGTH = (byte) 2;
+    private final static byte AMOUNT_LENGTH = (byte) 2;
+    private final static byte DATE_LENGTH = (byte) 8;
 
     private byte[] id = new byte[2];
     private byte[] date = new byte[8];
     private byte[] expirationDate = new byte[8];
     private byte[] amount = new byte[2];
+
+    byte[] lastNonce;
 
 
     /**
@@ -115,7 +140,11 @@ public class Epurse extends Applet implements ISO7816 {
         pin = new OwnerPIN((byte) 3, (byte) 4);
 
         //TODO: state for testing, change to RAW
-        status = STATE_PERSONALIZED;
+        status = STATE_RAW;
+
+        sessionStatus = JCSystem.makeTransientByteArray((short) 1, JCSystem.CLEAR_ON_RESET);
+        lastNonce = JCSystem.makeTransientByteArray((short)2,JCSystem.CLEAR_ON_RESET);
+
 
 
         register();
@@ -154,10 +183,35 @@ public class Epurse extends Applet implements ISO7816 {
      * @param offset from which index it should write the random number to the transcient buffer
      */
     private void incrementNumberAndStore(byte msb, byte lsb, short offset) {
+
         short number = Util.makeShort(msb, lsb);
         number += 1;
         transientBuffer[offset] = (byte) (number >> 8);
         transientBuffer[(short) (offset + (short) 1)] = (byte) number;
+        lastNonce[0] = transientBuffer[offset];
+        lastNonce[1] = transientBuffer[(short) (offset + (short) 1)];
+    }
+
+    /**
+     * Increment and also check whether is the right one
+     *
+     * @param msb    The most significant byte of the short
+     * @param lsb    The least significant byte of the short
+     * @param offset from which index it should write the random number to the transcient buffer
+     */
+    private void incrementNumberStoreAndCheck(byte msb, byte lsb, short offset) {
+
+        short lastNumber = Util.makeShort(lastNonce[0], lastNonce[1]);
+        short number = Util.makeShort(msb, lsb);
+
+        if((short)(lastNumber+1) != number) ISOException.throwIt(SW_WRONG_NONCE);
+
+        number += 1;
+        transientBuffer[offset] = (byte) (number >> 8);
+        transientBuffer[(short) (offset + (short) 1)] = (byte) number;
+
+        lastNonce[0] = transientBuffer[offset];
+        lastNonce[1] = transientBuffer[(short) (offset + (short) 1)];
     }
 
 
@@ -186,7 +240,7 @@ public class Epurse extends Applet implements ISO7816 {
      * @param signLength  The signature length
      * @param sk          The public key to use
      */
-    private boolean verify(byte[] source, short plainOffset, short plainLength,byte[] signSource, short signOffset, short signLength, RSAPublicKey sk) {
+    private boolean verify(byte[] source, short plainOffset, short plainLength, byte[] signSource, short signOffset, short signLength, RSAPublicKey sk) {
         signature = Signature.getInstance(Signature.ALG_RSA_SHA_PKCS1, false);
         signature.init(sk, Signature.MODE_VERIFY);
         return signature.verify(source, plainOffset, plainLength, signSource, signOffset, signLength);
@@ -205,9 +259,14 @@ public class Epurse extends Applet implements ISO7816 {
         // Store APDU header in global transient array
         Util.arrayCopy(apdu.getBuffer(), (short) 0, headerBuffer, (short) 0, (short) 5);
 
-        //check whether you are in the personalization state
+        // Check whether you are in the personalization state
         if (status == STATE_RAW) {
             switch (headerBuffer[OFFSET_INS]) {
+                //TODO: after test this will go inside the personalization
+                case BACKEND_KEY: {
+                    insBackendKey(apdu);
+                    break;
+                }
                 // Personalization APDUs:
                 case PERSONALIZATION_HI:
                     processPersonalizationHi(apdu);
@@ -220,94 +279,90 @@ public class Epurse extends Applet implements ISO7816 {
                     status = STATE_PERSONALIZED;
                     break;
                 default:
-                    throw new ISOException(UNKNOWN_INSTRUCTION_ERROR);
+                    throw new ISOException(SW_INS_NOT_SUPPORTED);
             }
 
-        } else {
+        } else if (status == STATE_PERSONALIZED) {
 
-            // Handle instructions
-            switch (headerBuffer[OFFSET_INS]) {
-                //Init phase:
-                case KEYPAIR_PRIVATE_RSA: {
-                    insKeypairPrivateRSA(apdu);
-                    break;
+
+            // Check whether the terminal auth is verified
+            if (sessionStatus[0] == TERMINAL_NO_AUTH) {
+
+
+                switch (headerBuffer[OFFSET_INS]) {
+                    //Verification APDUs:
+                    case VERIFICATION_HI:
+                        processVerificationHi(apdu);
+                        break;
+                    case VERIFICATION_V:
+                        processVerificationV(apdu);
+                        break;
+                    case VERIFICATION_S:
+                        processVerificationSignature(apdu);
+                        sessionStatus[0]=TERMINAL_AUTH;
+                        break;
+                    default:
+                        //ISOException.throwIt(headerBuffer[OFFSET_INS]);
+                        throw new ISOException(SW_INS_NOT_SUPPORTED);
                 }
-                case KEYPAIR_PRIVATE: {
-                    insKeyPairPrivate(apdu);
-                    break;
+
+            } else if (sessionStatus[0] == TERMINAL_AUTH) {
+                // Handle instructions
+                switch (headerBuffer[OFFSET_INS]) {
+                    //Init phase:
+                    case KEYPAIR_PRIVATE_RSA: {
+                        insKeypairPrivateRSA(apdu);
+                        break;
+                    }
+                    case KEYPAIR_PRIVATE: {
+                        insKeyPairPrivate(apdu);
+                        break;
+                    }
+
+                    case DECRYPTION_KEY: {
+                        insDecryptionKey(apdu);
+                        break;
+                    }
+
+                    //Decommissioning APDUs:
+                    case DECOMMISSIONING_HI:
+                        sendHiMessage(apdu);
+                        break;
+                    case DECOMMISSIONING_CLEAR:
+                        //TODO check nonces
+                        processDecommissioningClear(apdu);
+                        status = STATE_DECOMMISSIONED;
+                        break;
+
+                        //Reloading APDUs:
+                    case RELOADING_HI:
+                        sendHiMessage(apdu);
+                        break;
+                    case RELOADING_UPDATE:
+                        processReloadingUpdate(apdu);
+
+                        //Crediting APDUs:
+                    case CREDIT_HI:
+                        sendHiMessage(apdu);
+                        break;
+                    case CREDIT_COMMIT_PIN:
+                        checkPIN(apdu);
+                        break;
+                    //TODO:
+                    case CREDIT_COMMIT_NO_PIN:
+                        //TODO:
+                    case CREDIT_NEW_BALANCE:
+                        //TODO:
+                    default:
+                        throw new ISOException(SW_INS_NOT_SUPPORTED);
                 }
-                //TODO: after test this will go inside the personalization
-                case BACKEND_KEY: {
-                    insBackendKey(apdu);
-                    break;
-                }
-                case DECRYPTION_KEY: {
-                    insDecryptionKey(apdu);
-                    break;
 
-                }
-                //Verification APDUs:
-                case VERIFICATION_HI:
-                    insVerificationHigh(apdu);
-                    break;
-                case VERIFICATION_V:
-                    processVerificationV(apdu);
-                    break;
-                case VERIFICATION_S:
-                    processVerificationSignature(apdu);
-                    break;
+            }else ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
-                //Decommissioning APDUs:
-                case DECOMMISSIONING_HI:
-                    //Todo:
-                case DECOMMISSIONING_CLEAR:
-                    //Todo:
-
-                    //Reloading APDUs:
-                case RELOADING_HI:
-                    //TODO:
-                case RELOADING_UPDATE:
-                    //TODO:
-
-                    //Crediting APDUs:
-                case CREDIT_HI:
-                    //TODO:
-                case CREDIT_COMMIT_PIN:
-                    checkPIN(apdu);
-                    break;
-                //TODO:
-                case CREDIT_COMMIT_NO_PIN:
-                    //TODO:
-                case CREDIT_NEW_BALANCE:
-                    //TODO:
-
-                default:
-                    throw new ISOException(UNKNOWN_INSTRUCTION_ERROR);
-            }
-        }
+        }else ISOException.throwIt(SW_CARD_BLOCKED);
     }
 
-    /**
-     * Read apdu buffer and store into a different array
-     *
-     * @param apdu   The apdu
-     * @param dest   The destination array
-     * @param offset The offset within the destination array
-     * @param length The length
-     */
-    private void readBuffer(APDU apdu, byte[] dest, short offset,
-                            short length) {
-        byte[] buf = apdu.getBuffer();
-        short readCount = apdu.setIncomingAndReceive();
-        short i = 0;
-        Util.arrayCopy(buf, OFFSET_CDATA, dest, offset, readCount);
-        while ((short) (i + readCount) < length) {
-            i += readCount;
-            offset += readCount;
-            readCount = (short) apdu.receiveBytes(OFFSET_CDATA);
-            Util.arrayCopy(buf, OFFSET_CDATA, dest, offset, readCount);
-        }
-    }
+
 
     /**
      * @param apdu
@@ -323,8 +378,30 @@ public class Epurse extends Applet implements ISO7816 {
         }
     }
 
+    private void processVerificationHi(APDU apdu) {
+        //Increment the received number
+        short datalength = (short) headerBuffer[OFFSET_LC];
+        readBuffer(apdu,transientBuffer,(short)0,datalength);
+
+        incrementNumberAndStore(transientBuffer[0], transientBuffer[1], (short) 0);
+
+        //Send ID, we assume that the card is already personalized
+        Util.arrayCopy(id, (short) 0, transientBuffer, (short) 2, (short) 2);
+        datalength = (short) (datalength + 2);
+
+        short signatureSize = sign(transientBuffer, (short) 0, datalength, transientBuffer, datalength);
+        //short signatureSize = signature.sign(transientBuffer, (short) 0, (short) 3, transientBuffer, (short) 4);
+
+        //Send the response
+        apdu.setOutgoing();
+        apdu.setOutgoingLength((short) (datalength + signatureSize));
+        apdu.sendBytesLong(transientBuffer, (short) 0, (short) (datalength + signatureSize));
+
+    }
+
     /**
      * Save termporarily the public key of the terminal
+     *
      * @param apdu
      */
     private void processVerificationV(APDU apdu) {
@@ -339,18 +416,24 @@ public class Epurse extends Applet implements ISO7816 {
         terminalKey.setModulus(transientBuffer, exponentLength, modulusLength);
     }
 
+    /**
+     * Verify terminal key with the backent signature
+     *
+     * @param apdu
+     */
     private void processVerificationSignature(APDU apdu) {
 
         short datalength = (short) (headerBuffer[OFFSET_LC] & 0x00FF);
         readBuffer(apdu, transientBuffer, (short) 0, datalength);
 
+
         // get teminal key data stored
-        byte [] bytesTermKeyStored = new byte [128+3];
-        terminalKey.getExponent(bytesTermKeyStored,(short)0);
-        terminalKey.getModulus(bytesTermKeyStored,(short)3);
+        byte[] bytesTermKeyStored = new byte[128 + 3];
+        terminalKey.getExponent(bytesTermKeyStored, (short) 0);
+        terminalKey.getModulus(bytesTermKeyStored, (short) 3);
 
         // verify with received sign
-        boolean isVerified = verify(bytesTermKeyStored, (short) 0, (short) 131,transientBuffer, (short) 0, (short) 128, backEndKey);
+        boolean isVerified = verify(bytesTermKeyStored, (short) 0, (short) 131, transientBuffer, (short) 0, (short) 128, backEndKey);
         // TODO:Safe state term verifien somewhere
         if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);
     }
@@ -395,7 +478,7 @@ public class Epurse extends Applet implements ISO7816 {
         short modulusLength = (short) (headerBuffer[OFFSET_P2] & 0x00FF);
 
         backEndKey.setExponent(transientBuffer, (short) 0, exponentLength);
-        backEndKey.setModulus(transientBuffer, exponentLength , modulusLength);
+        backEndKey.setModulus(transientBuffer, exponentLength, modulusLength);
 
        /* if(headerBuffer[OFFSET_P1]==(byte)0){
             backEndKey.setModulus(transientBuffer, (short) 0, datalength);
@@ -419,25 +502,32 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
     /**
+     * Read apdu buffer and send back [nonce+1, id] SKC
+     *
      * @param apdu
      */
-    private void insVerificationHigh(APDU apdu) {
+    private void sendHiMessage(APDU apdu) {
         //Increment the received number
-        short datalength = (short) headerBuffer[OFFSET_LC];
-        Util.arrayCopy(apdu.getBuffer(), OFFSET_CDATA, transientBuffer, (short) 0, datalength);
+        short datalength = (short) (headerBuffer[OFFSET_LC] & 0x00FF);
+        readBuffer(apdu,transientBuffer,(short)0,datalength);
 
-        //incrementNumberAndStore(transientBuffer[0], transientBuffer[1], (short) 0);
+        // Verify with received sign
+        boolean isVerified = verify(transientBuffer, (short) 0, (short) 2, transientBuffer, (short) 2, (short) 128, terminalKey);
+        // If signature verification not verified throw exception
+        if (!isVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
-        //Sign the response
-        transientBuffer[2] = (byte) 42;
-//                signature.init(keypair.getPrivate(), Signature.MODE_SIGN);
+        incrementNumberAndStore(transientBuffer[0], transientBuffer[1], (short) 0);
 
-        short signatureSize = signature.sign(transientBuffer, (short) 0, (short) 3, transientBuffer, (short) 4);
+        //Send ID, we assume that the card is already personalized
+        Util.arrayCopy(id, (short) 0, transientBuffer, (short) 2, (short) 2);
+        datalength = (short) (4);
+
+        short signatureSize = sign(transientBuffer, (short) 0, datalength, transientBuffer, datalength);
 
         //Send the response
         apdu.setOutgoing();
-        apdu.setOutgoingLength((short) 2);
-        apdu.sendBytesLong(transientBuffer, (short) 0, (short) (3 + signatureSize));
+        apdu.setOutgoingLength((short) (datalength + signatureSize));
+        apdu.sendBytesLong(transientBuffer, (short) 0, (short) (datalength + signatureSize));
 
     }
 
@@ -490,6 +580,57 @@ public class Epurse extends Applet implements ISO7816 {
             ISOException.throwIt(SW_VERIFICATION_FAILED);
 
 
+    }
+
+    private void processDecommissioningClear(APDU apdu) {
+        readBuffer(apdu, transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0);
+        //TODO verify terminal signature
+    }
+
+    /**
+     * Process message [nonce, id, amount] SKT
+     *
+     * @param apdu
+     */
+    private void processReloadingUpdate(APDU apdu) {
+
+        readBuffer(apdu, transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
+
+        // Verify with received sign
+        short payloadLength = NONCE_LENGTH + ID_LENGTH + AMOUNT_LENGTH;
+        boolean isVerified = verify(transientBuffer, (short) 0, payloadLength, transientBuffer, payloadLength, (short) 128, terminalKey);
+        // If signature verification not verified throw exception
+        if (!isVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0);
+
+        // Store new amount
+        Util.arrayCopy(transientBuffer, NONCE_LENGTH, amount, (short)0, AMOUNT_LENGTH);
+    }
+
+
+
+    /**
+     * Read apdu buffer and store into a different array
+     *
+     * @param apdu   The apdu
+     * @param dest   The destination array
+     * @param offset The offset within the destination array
+     * @param length The length
+     */
+    private void readBuffer(APDU apdu, byte[] dest, short offset,
+                            short length) {
+        byte[] buf = apdu.getBuffer();
+        short readCount = apdu.setIncomingAndReceive();
+        short i = 0;
+        Util.arrayCopy(buf, OFFSET_CDATA, dest, offset, readCount);
+        while ((short) (i + readCount) < length) {
+            i += readCount;
+            offset += readCount;
+            readCount = (short) apdu.receiveBytes(OFFSET_CDATA);
+            Util.arrayCopy(buf, OFFSET_CDATA, dest, offset, readCount);
+        }
     }
 
 }

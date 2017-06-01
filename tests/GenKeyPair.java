@@ -46,9 +46,43 @@ public class GenKeyPair {
 
 		byte[] skbufexp = getBytes(publickey.getPublicExponent());
 
-		// Print public key to class file*/
-		File classFile = new File("tests/BEkeys.java");
-		printClass(privatekey, pkbufmod, pkbufexp, skbufmod, skbufexp, (short) 0, (short)128, classFile);
+		// Print public key to class file
+		File classFile = new File("src/BackendKeys.java");
+		printClassHEX(privatekey, publickey,(short) 0, (short)128, classFile );
+		//printClass(privatekey, pkbufmod, pkbufexp, skbufmod, skbufexp, (short) 0, (short)128, classFile);
+	}
+
+	private static void printClassHEX(RSAPrivateKey pk, RSAPublicKey sk, short offset, short length, File f) {
+		PrintWriter pw = null;
+		try {
+			pw = new PrintWriter(f);
+			//pw.println("package tests;\n");
+			pw.println("//AUTO-GENERATED FILE");
+			pw.println("//DO NOT MODIFY");
+			pw.println("public class BackendKeys {");
+			pw.print("\tpublic static final String privateModulusBackend = ");
+			pw.println("\""+pk.getModulus().toString(16)+"\";");
+
+			pw.print("\tpublic static final String privateExponentBackend = ");
+			pw.println("\""+pk.getPrivateExponent().toString(16)+"\";");
+
+			pw.print("\tpublic static final String publicModulusBackend = ");
+			pw.println("\""+sk.getModulus().toString(16)+"\";");
+
+			pw.print("\tpublic static final String publicExponentBackend = ");
+			pw.println("\""+sk.getPublicExponent().toString(10)+"\";");
+			pw.println("}");
+
+
+		} catch(IOException e) {
+			System.out.println("An error occurred while writing to file " + f.getName());
+		} finally {
+			try {
+				pw.close();
+			} catch(Exception e) {
+				System.out.println("An error occurred while closing file " + f.getName());
+			}
+		}
 	}
 
 	private static void printClass(RSAPrivateKey pk, byte[] bufPriMod, byte[]bufPriExp, byte[] bufShaMod, byte[]bufShaExp, short offset, short length, File f) {
@@ -60,7 +94,6 @@ public class GenKeyPair {
 			pw.println("//DO NOT MODIFY");
 			pw.println("public class BEkeys {");
 			pw.print("\tpublic static final byte[] privateKeyBEMod = ");
-			//pw.print(pk.getModulus().toString(16));
 			pw.println(toByteArrayString(bufPriMod, offset, (short)bufPriMod.length));
 
 			pw.print("\tpublic static final byte[] privateKeyBEExp = ");

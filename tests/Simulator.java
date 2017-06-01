@@ -25,6 +25,9 @@ import java.security.MessageDigest;
 import java.security.Signature;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.RSAPrivateKeySpec;
+import java.security.spec.RSAPublicKeySpec;
 import java.util.List;
 
 /**
@@ -69,6 +72,9 @@ public class Simulator extends TestCase {
     private static JavaxSmartCardInterface simulator = null;
     SecureRandom secureRandom;
 
+    private RSAPublicKey publicKeyBackend;
+    private RSAPrivateKey privateKeyBackend;
+
 
 
     public void testSelect() throws CardException, NoSuchAlgorithmException, javax.smartcardio.CardException {
@@ -78,6 +84,48 @@ public class Simulator extends TestCase {
         ResponseAPDU response = cardChannel.transmit(selectApplet);
         assertEquals(0x9000, response.getSW());
     }
+
+    void loadBackendKeys() throws InvalidKeyException, SignatureException, NoSuchProviderException, NoSuchAlgorithmException {
+        // Load the key into BigIntegers
+        BigInteger modulus = new BigInteger(BackendKeys.privateModulusBackend, 16);
+        BigInteger exponent = new BigInteger(BackendKeys.privateExponentBackend, 16);
+        BigInteger pubExponent = new BigInteger(BackendKeys.publicExponentBackend);
+
+        // Create private and public key specs
+        RSAPrivateKeySpec privateSpec = new RSAPrivateKeySpec(modulus, exponent);
+        RSAPublicKeySpec publicSpec = new RSAPublicKeySpec(modulus, pubExponent);
+
+        // Create a key factory
+        KeyFactory factory = null;
+        try {
+            factory = KeyFactory.getInstance("RSA");
+            // Create the RSA private and public keys
+            privateKeyBackend = (RSAPrivateKey) factory.generatePrivate(privateSpec);
+            publicKeyBackend = (RSAPublicKey) factory.generatePublic(publicSpec);
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        } catch (InvalidKeySpecException e) {
+            e.printStackTrace();
+        }
+
+
+        /*Signature signature = Signature.getInstance("SHA1withRSA", "BC");
+        signature.initSign(privateKeyBackend);
+        signature.update((byte)20);
+        byte [] bytesSignature = signature.sign();
+        int lengthSignature = bytesSignature.length;
+
+        signature.initVerify(publicKeyBackend);
+        signature.update((byte)20);
+        //Lets check it
+        boolean verified = signature.verify(bytesSignature, 0, lengthSignature);
+        System.out.println(verified);
+*/
+
+
+
+
+}
 
     @BeforeClass
     protected void setUp() throws Exception {
@@ -122,6 +170,32 @@ public class Simulator extends TestCase {
         Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
 
         setUpIsDone = true;
+
+        loadBackendKeys();
+    }
+
+    // Send all step personalization
+    private void personalizationFull() throws javax.smartcardio.CardException, NoSuchAlgorithmException, CardException {
+
+        System.out.println("-----Test Personalization-----");
+        testSendBackendKey();
+        testPersonalizationHi();
+        testPesonalizationDates();
+        testPin();
+    }
+
+    public void testSendBackendKey() throws javax.smartcardio.CardException {
+        // Send BE key for verify signatures(this will be done in the personalization)
+        byte[] exponentBytesBE = getBytes(publicKeyBackend.getPublicExponent());
+        byte[] modulusBytesBE = getBytes(publicKeyBackend.getModulus());
+        byte[] bytesKeyBE = new byte [modulusBytesBE.length+exponentBytesBE.length];
+        Util.arrayCopy(exponentBytesBE,(short)0,bytesKeyBE,(short)0,(short)exponentBytesBE.length);
+        Util.arrayCopy(modulusBytesBE,(short)0,bytesKeyBE,(short)exponentBytesBE.length,(short)modulusBytesBE.length);
+        CommandAPDU capdu;
+        capdu = new CommandAPDU(CLASS, BACKEND_KEY, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyBE);
+        ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
+        System.out.println("BACKEND_KEY: " + Integer.toHexString(responsePrivate.getSW()));
+
     }
 
     public void testSignatureRSA() {
@@ -178,8 +252,9 @@ public class Simulator extends TestCase {
 
     // the key components and the signature dont fit in an apdu, the idea is send this component
     // firts and then signature of both, modulus and exponent
-    public void testTerminalAuth() throws NoSuchProviderException, NoSuchAlgorithmException, InvalidKeyException {
+    public void testTerminalAuth() throws NoSuchProviderException, NoSuchAlgorithmException, InvalidKeyException, javax.smartcardio.CardException, CardException, SignatureException {
 
+        personalizationFull();
         //First generate test terminal keypair
         KeyPairGenerator g = KeyPairGenerator.getInstance("RSA", "BC");
         g.initialize(1024, new SecureRandom());
@@ -188,44 +263,36 @@ public class Simulator extends TestCase {
         byte[] exponentBytes = getBytes(publicKey.getPublicExponent());
         byte[] modulusBytes = getBytes(publicKey.getModulus());
 
-        //Generate BE keys
-        g.initialize(1024, new SecureRandom());
-        java.security.KeyPair pairB = g.generateKeyPair();
-        RSAPrivateKey privateKeyBE = (RSAPrivateKey) pairB.getPrivate();
-        RSAPublicKey publicKeyBE = (RSAPublicKey) pairB.getPublic();
 
         //Sign the public key of the terminal
         byte[] bytesKeyTerm = new byte [modulusBytes.length+exponentBytes.length];
-        Util.arrayCopy(modulusBytes,(short)0,bytesKeyTerm,(short)0,(short)modulusBytes.length);
-        Util.arrayCopy(exponentBytes,(short)0,bytesKeyTerm,(short)modulusBytes.length,(short)exponentBytes.length);
+        Util.arrayCopy(exponentBytes,(short)0,bytesKeyTerm,(short)0,(short)exponentBytes.length);
+        Util.arrayCopy(modulusBytes,(short)0,bytesKeyTerm,(short)exponentBytes.length,(short)modulusBytes.length);
 
         // This is the signature of the BackEnd
         byte[] signedKeyTerm = null;
+        int lenghtSig=0;
+        Signature signature = null;
         try {
-            Signature signature = Signature.getInstance("SHA1withRSA", "BC");
-            signature.initSign(privateKeyBE);
-            signature.update(bytesKeyTerm,0,bytesKeyTerm.length);
+            signature = Signature.getInstance("SHA1withRSA", "BC");
+            signature.initSign(privateKeyBackend);
+            signature.update(bytesKeyTerm);
             signedKeyTerm = signature.sign();
-            int lenghtSig = signedKeyTerm.length;
+            lenghtSig = signedKeyTerm.length;
 
         }catch (Exception e){
             e.printStackTrace();
         }
 
-        // Send BE key for verify signatures(this will be done in the personalization)
-        byte[] exponentBytesBE = getBytes(publicKeyBE.getPublicExponent());
-        byte[] modulusBytesBE = getBytes(publicKeyBE.getModulus());
-        byte[] bytesKeyBE = new byte [modulusBytesBE.length+exponentBytesBE.length];
-        Util.arrayCopy(exponentBytesBE,(short)0,bytesKeyBE,(short)0,(short)exponentBytesBE.length);
-        Util.arrayCopy(modulusBytesBE,(short)0,bytesKeyBE,(short)exponentBytesBE.length,(short)modulusBytesBE.length);
-        CommandAPDU capdu;
-        capdu = new CommandAPDU(CLASS, BACKEND_KEY, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyBE);
-        ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
-        System.out.println("BACKEND_KEY: " + Integer.toHexString(responsePrivate.getSW()));
+        signature.initVerify(publicKeyBackend);
+        signature.update(bytesKeyTerm);
+        //Lets check it
+        boolean verified = signature.verify(signedKeyTerm, 0, lenghtSig);
+
 
         // Send public key of the terminal
-        capdu = new CommandAPDU(CLASS, VERIFICATION_V, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyTerm);
-        responsePrivate = simulator.transmitCommand(capdu);
+        CommandAPDU capdu = new CommandAPDU(CLASS, VERIFICATION_V, (byte) exponentBytes.length, (byte) modulusBytes.length, bytesKeyTerm);
+        ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
         System.out.println("VERIFICATION_V: " + Integer.toHexString(responsePrivate.getSW()));
 
         // Send public key of the terminal signed
@@ -282,14 +349,76 @@ public class Simulator extends TestCase {
 //        assertEquals(random+1, incremented);
     }
 
-    public void testPersonalization(){
-        System.out.println("Test Personalization");
+    public void testPersonalizationHi() throws NoSuchAlgorithmException {
+        KeyPairGenerator generator  = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(1024);
+        java.security.KeyPair keypair = generator.generateKeyPair();
+        RSAPublicKey cardPublickey = (RSAPublicKey) keypair.getPublic();
+        RSAPrivateKey cardPrivateKey = (RSAPrivateKey) keypair.getPrivate();
 
-        byte [] nonceBytes = new byte[2];
-        secureRandom.nextBytes(nonceBytes);
-        CommandAPDU hiAPDU = new CommandAPDU(CLASS, PERSONALIZATION_HI, 0, 0, nonceBytes, 2);
-        ResponseAPDU responseAPDU = simulator.transmitCommand(hiAPDU);
+        //byte [] nonceBytes = new byte[2];
+        //secureRandom.nextBytes(nonceBytes);
+
+        byte[] modulus = getBytes(cardPrivateKey.getModulus());
+        // Sending modulus private key
+        CommandAPDU capdu;
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 0, (byte) 0, modulus);
+        ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
+        System.out.println("PERSONALIZATION_HI private modulus: " + Integer.toHexString(responsePrivate.getSW()));
+
+        // Sending exponent private key
+        byte[] exponent = getBytes(cardPrivateKey.getPrivateExponent());
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 1, (byte) 0, exponent);
+        responsePrivate = simulator.transmitCommand(capdu);
+        System.out.println("PERSONALIZATION_HI private exponent: " + Integer.toHexString(responsePrivate.getSW()));
+
+        modulus = getBytes(cardPublickey.getModulus());
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 2, (byte) 0, modulus);
+        responsePrivate = simulator.transmitCommand(capdu);
+        System.out.println("PERSONALIZATION_HI public modulus: " + Integer.toHexString(responsePrivate.getSW()));
+
+        exponent = getBytes(cardPublickey.getPublicExponent());
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 3, (byte) 0, exponent);
+        responsePrivate = simulator.transmitCommand(capdu);
+        System.out.println("PERSONALIZATION_HI public exponent: " + Integer.toHexString(responsePrivate.getSW()));
+
     }
+
+    public void testPesonalizationDates() throws CardException {
+
+        // Get current date unix seconds
+        int unixTime = (int)(System.currentTimeMillis() / 1000);
+        byte[] personalizedDate = new byte[]{
+                (byte) (unixTime >> 24),
+                (byte) (unixTime >> 16),
+                (byte) (unixTime >> 8),
+                (byte) unixTime
+
+        };// convert date to byte array
+
+        // Create a random card ID
+        short randId = (short) ((double) 10000 * Math.random());
+        byte[] id = new byte[]{
+                (byte) (randId >> 8),
+                (byte) randId
+
+        };
+
+        short idUnido = Util.makeShort(id[0], id[1]);
+        // TODO check unique ID = " SELECT COUNT(*) as CN FROM CARD WHERE CARDID= (?)";
+
+        byte[] dataToSend = new byte[6];//container of data that will be sent to the card
+
+        Util.arrayCopy(id, (short)0, dataToSend, (short)0, (short)2); //copy card id to container
+        Util.arrayCopy(personalizedDate, (short)0, dataToSend, (short)2, (short)4);//copy date to container
+        //send data to the card
+        CommandAPDU capdu;
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_DATES, (byte) 0, (byte) 0, dataToSend);
+        ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
+        System.out.println("PERSONALIZATION_DATES: " + Integer.toHexString(responsePrivate.getSW()));
+
+    }
+
 
     /**
      * Initialization involves transferring the private key to the smartcard.

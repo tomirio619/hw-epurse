@@ -18,29 +18,29 @@ Building is done using an Ant build script.
 
 4. Go to `File -> Project Structure -> Libraries`. Remove current Classes entry. Then add `\lib\jc221\lib\api.jar`.
 
-5. Open `Common.properties` file and setup everything you need there according to the comments. This includes the __path__ to SDK installation folder. 
+5. Open `Common.properties` file and setup everything you need there according to the comments. This includes the __path__ to SDK installation folder.
 Open `build.xml` (this is an Ant build package so you need Ant plugin to be installed in IDEA) and correct the entries that follow `${APPLETAIDPREFIX}` to suit your AID.
 
-6. To build the applet, go to use `View -> Tool Windows -> Ant Build`. A window will pop up on the right side of your screen. 
+6. To build the applet, go to use `View -> Tool Windows -> Ant Build`. A window will pop up on the right side of your screen.
 If you don't see any build targets, click on the green plus and select the `build.xml` file.  Use `binarize.all.standard` to build the applet for Gemalto TOPs and similiar.
 
 7. Target files will be placed in `\out\ePurse\javacard`
 
 8. If you have more than one applet in the project, edit `build.xml` and add a second entry under each tag with the info you need.
 
-Now you can build your applet using IDEA's menu: `Build -> Build Project` 
+Now you can build your applet using IDEA's menu: `Build -> Build Project`
 
 
 ## Common Problems
 
-__Q__: IntelliJ does not autocomplete on the `.jar` I imported 
+__Q__: IntelliJ does not autocomplete on the `.jar` I imported
 
 __A__: This is probaby because your sources are not specified as sources in the project itself. Go to `File -> Project Properties`, click on `Modules`.
 Now click on the folder that contains your sources (`src` in our case), and mark the folder as _Resources_.
 
-__Q__: When I try to build and run the `Terminal` module, I get one of the following errors: _Cannot start compilation: the outpath path is not specified for module "Terminal". Specify the outpat path in Configure Project_ or _Error: Could not find or load main class Terminal_ 
+__Q__: When I try to build and run the `Terminal` module, I get one of the following errors: _Cannot start compilation: the outpath path is not specified for module "Terminal". Specify the outpat path in Configure Project_ or _Error: Could not find or load main class Terminal_
 
-__A__: This has something to do with the output path of the module. `File -> Project Structure` (or `CTRL + ALT + SHFT + S` for short), select the `Terminal` module. In the tab `Paths`, under `Compiler ouput` select `Inherit project compile output path`. On the left side, under Project Settings, click on `Project`. On the bottom, you see `Project compiler output`. This is the location where `.class` files of the module will be put. 
+__A__: This has something to do with the output path of the module. `File -> Project Structure` (or `CTRL + ALT + SHFT + S` for short), select the `Terminal` module. In the tab `Paths`, under `Compiler ouput` select `Inherit project compile output path`. On the left side, under Project Settings, click on `Project`. On the bottom, you see `Project compiler output`. This is the location where `.class` files of the module will be put.
 In your project, create an addition folder called `classes`, and put the __absolute__ location in this field (e.g. `C:\Users\%USERNAME%\Documents\ePurse\out\classes`, where `%USERNAME%` is your username).
 Once done, click `Apply` on the bottom and you should be good to go.
 
@@ -56,7 +56,7 @@ The following commands can now be used (where `applet.cap` is the applet you wan
   ```
   java -jar gp.jar -install applet.cap
   ```
-* __Delete applet__. An applet can be deleted by specifying the AID (Application Identifier) of the applet: 
+* __Delete applet__. An applet can be deleted by specifying the AID (Application Identifier) of the applet:
   ```
   java -jar gp.jar --deletedeps --delete 3B2963616C6300
   ```
@@ -68,13 +68,13 @@ Command APDU:
 
 | CLA | INS | P1 | P2 | Lc | Data field | Le |
 | ----|:---:| --:|--:| --:| --:| --:|
-| 0x0 | 0xA4 | 0x04 | 0x0 | 0x08 | 0xF2, 0x34, 0x12, 0x34, 0x56, 0x10, 0x0, 0x1 | N/A |
+| 0x0 | 0xA4 | 0x04 | 0x0 | 0x08 | 0xA0, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x10, 0x01 | N/A |
 
 Response APDU:
 
 | Optional | Status word | Meaning |
 | ----|:---:| --:|
-| No data | 0xx9000 | Successful processing |
+| No data | 0x9000 | Successful processing |
 | | 0x6999 | Applet selection failed |
 
 ## VERIFY HI command
