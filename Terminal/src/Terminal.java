@@ -1,3 +1,4 @@
+import com.sun.xml.internal.bind.v2.runtime.unmarshaller.ValuePropertyLoader;
 import javacard.framework.ISO7816;
 import javacard.framework.Util;
 import org.bouncycastle.util.encoders.Hex;
@@ -11,6 +12,7 @@ import java.security.interfaces.RSAPublicKey;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.RSAPrivateKeySpec;
 import java.security.spec.RSAPublicKeySpec;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Scanner;
@@ -52,21 +54,21 @@ public class Terminal {
     private RSAPrivateKey privateKeyTerminal;
 
     private SecureRandom secureRandom;
+    private byte[] terminalId = new byte[]{0x33, 0x55};
+
+    private RSAPublicKey publicKeyCard;
 
 
     public Terminal() {
+        Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
         loadBackendKeys();
         loadTerminalKeys();
         secureRandom = new SecureRandom();
+
+
         (new TerminalThread()).start();
     }
 
-
-
-    public static void main(String[] args) {
-        Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
-        Terminal terminal = new Terminal();
-    }
 
     void loadBackendKeys()   {
 
@@ -201,6 +203,60 @@ public class Terminal {
             testPin(ch);
         }
 
+        /**
+         * Checks whether a nonce (oldNonce1 || oldNonce2) + incrementedBy == nonce (newNonce1 || newNonce2)
+         * @param oldNonce1
+         * @param oldNonce2
+         * @param newNonce1
+         * @param newNonce2
+         * @param incrementedBy
+         * @return
+         */
+        private boolean isNonceIncrementedBy(byte oldNonce1, byte oldNonce2, byte newNonce1, byte newNonce2, int incrementedBy){
+            short old = Util.makeShort(oldNonce1, oldNonce2);
+            short newNonce = Util.makeShort(newNonce1, newNonce2);
+
+            return old + incrementedBy == newNonce;
+        }
+
+        private byte[] sign(byte[] textToSign){
+            Signature signature = null;
+            try {
+                signature = Signature.getInstance("SHA1withRSA", "BC");
+                signature.initSign(privateKeyTerminal);
+                signature.update(textToSign,0,textToSign.length);
+                return signature.sign();
+            } catch (NoSuchAlgorithmException | NoSuchProviderException | SignatureException | InvalidKeyException e) {
+                e.printStackTrace();
+            }
+
+            return null;
+        }
+
+        private boolean verify(PublicKey publicKey, byte[] plainText, byte[] signedBytes){
+            Signature signature = null;
+            try {
+                signature = Signature.getInstance("SHA1withRSA", "BC");
+                signature.initVerify(publicKey);
+                signature.update(plainText);
+                return signature.verify(signedBytes, 0, signedBytes.length);
+            } catch (NoSuchAlgorithmException | NoSuchProviderException | SignatureException | InvalidKeyException e) {
+                e.printStackTrace();
+                return false;
+            }
+        }
+
+        private byte[] incrementNonceBy(byte n1, byte n2, int incrementBy){
+            short old = Util.makeShort(n1, n2);
+            old += incrementBy;
+
+            byte[] nonce = {
+                    (byte) (old & 0xff),
+                    (byte) ((old >> 8) & 0xff),
+            };
+            return nonce;
+        }
+
         // the key components and the signature dont fit in an apdu, the idea is send this component
         // firts and then signature of both, modulus and exponent
         public void testTerminalAuth(CardChannel ch) throws NoSuchProviderException, NoSuchAlgorithmException, InvalidKeyException, CardException {
@@ -214,7 +270,30 @@ public class Terminal {
             System.out.println("VERIFICATION_HI: " + Integer.toHexString(responseAPDU.getSW()));
 
             byte [] ca = responseAPDU.getData(); // Data Ca{Ca}SKC
-            //TODO: check nonce and send to the backend Ca,TA {TA, {Ca}SKC}SKT
+
+            if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], ca[0], ca[1], 1)){
+                System.out.println("Nonce not incremented");
+            }
+
+            //Create TA
+            byte[] TA = new byte[4 + ca.length-4]; //TA is our Id, incremented nonce and the signature part of CA
+            byte[] nonce = incrementNonceBy(nonceBytes[0], nonceBytes[1], 1);
+            Util.arrayCopy(nonce, (short) 0, TA, (short) 0, (short) 2);
+            Util.arrayCopy(terminalId, (short) 0, TA, (short) 2, (short) 2);
+            Util.arrayCopy(ca, (short) 4, TA, (short) 4, (short) (ca.length-4));    //Signature part of CA
+            byte[] TASigned = sign(TA);
+
+            byte[] CaTaTaSigned = new byte[4+4+TASigned.length]; //We send 4 bytes of Ta, 4 bytes of CA and then the signed part of TA
+            Util.arrayCopy(ca, (short) 0, CaTaTaSigned, (short) 0, (short) 4); //Plaintext of CA
+            Util.arrayCopy(TA, (short) 0, CaTaTaSigned, (short) 4, (short) 4); //Plaintext of TA
+            Util.arrayCopy(TASigned, (short) 0, CaTaTaSigned, (short) 8, (short) TASigned.length);  //Copy everything else
+
+            //Todo: Send everything to the backend
+
+            /*
+            FIXME:
+            Remove from HERE
+             */
 
             //Sign the public key of the terminal (this id done in the backend)
             byte[] exponentBytes = getBytes(publicKeyTerminal.getPublicExponent());
@@ -236,8 +315,49 @@ public class Terminal {
                 e.printStackTrace();
             }
 
+            /*
+            FIXME: Until here
+             */
 
-            //TODO: receive V from the backend and split it in two part (plaintext and signature),
+
+            byte[] v = new byte[5000]; //Received from the backend composed of (plaintext Public key card, plaintext public key terminal, nonce incremented, signature digest of previous)
+            int publicKeySize = 1024/8;
+
+            //Check if nonce is properly incremented
+            if (! isNonceIncrementedBy(nonce[0], nonce[1], v[2*publicKeySize], v[2*publicKeySize+1], 1)){
+                System.out.println("Nonce is not incremented!");
+                return;
+            }
+
+            //Check if signature is valid
+            byte[] vPlaintext = new byte[2*publicKeySize+2];
+            Util.arrayCopy(v, (short) 0, vPlaintext, (short) 0, (short) publicKeySize); //Copy public key card plaintext
+            Util.arrayCopy(v, (short) publicKeySize, vPlaintext, (short) publicKeySize, (short) publicKeySize ); //Copy public key terminal
+            Util.arrayCopy(v, (short) (2*publicKeySize), vPlaintext, (short) (2*publicKeySize), (short) 2); //Copy the nonce
+
+
+            short signatureSize = (short) (v.length - (2*publicKeySize+2));
+            byte[] vSignature = new byte[signatureSize]; //Buffer for signature
+            Util.arrayCopy(v, (short) (2*publicKeySize+2), vSignature, (short) 0, signatureSize);
+
+            if (!verify(publicKeyTerminal, vPlaintext, vSignature)) {
+                System.out.println("Signature is not valid");
+                return;
+            }
+
+            //Keep a copy of the public key of the card here
+            byte[] publicKeyCardBytes = new byte[publicKeySize];
+            Util.arrayCopy(vPlaintext, (short) 0, publicKeyCardBytes, (short) 0, (short) publicKeySize);
+            try {
+                //Todo: look at whether this is correct. Only works if the RSA public key that has been received was send using the getEncoded() function
+                publicKeyCard = (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(publicKeyCardBytes));
+            } catch (InvalidKeySpecException e) {
+                e.printStackTrace();
+            }
+
+            //Send to card
+
+
             CommandAPDU capdu;
             ResponseAPDU responsePrivate;
 
@@ -300,7 +420,6 @@ public class Terminal {
             capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 3, (byte) 0, exponent);
             responsePrivate = ch.transmit(capdu);
             System.out.println("PERSONALIZATION_HI public exponent: " + Integer.toHexString(responsePrivate.getSW()));
-
         }
 
         private void testPesonalizationDates(CardChannel ch) throws CardException {
@@ -315,32 +434,34 @@ public class Terminal {
 
             };// convert date to byte array
 
-            //TODO: generate and experiation date and send it to backend and card
-
-            // Create a random card ID
-            short randId = (short) ((double) 10000 * Math.random());
-            byte[] id = new byte[]{
-                    (byte) (randId >> 8),
-                    (byte) randId
-
+            //Expiration date is the current moment + two years in seconds
+            int expirationTime = unixTime + 63113851;
+            byte[] expirationDate = new byte[]{
+                    (byte) (expirationTime >> 24),
+                    (byte) (expirationTime >> 16),
+                    (byte) (expirationTime >> 8),
+                    (byte) expirationTime
             };
 
-            short idUnido = Util.makeShort(id[0], id[1]);
-            // TODO check unique ID = " SELECT COUNT(*) as CN FROM CARD WHERE CARDID= (?)";
+            //TODO: Request unique ID from the backend, send public key to the backend
 
-            byte[] dataToSend = new byte[6];//container of data that will be sent to the card
+            //Receive id of the card
+            byte[] id = new byte[2];
+            byte[] dataToSend = new byte[10];//container of data that will be sent to the card
 
             Util.arrayCopy(id, (short)0, dataToSend, (short)0, (short)2); //copy card id to container
-            Util.arrayCopy(personalizedDate, (short)0, dataToSend, (short)2, (short)4);//copy date to container
+            Util.arrayCopy(personalizedDate, (short)0, dataToSend, (short) 2, (short) 4);//copy date to container
+            Util.arrayCopy(expirationDate, (short) 0, dataToSend, (short) 6, (short) 4); //Copy the expiration date to the container
+
             //send data to the card
             CommandAPDU capdu;
             capdu = new CommandAPDU(CLASS, PERSONALIZATION_DATES, (byte) 0, (byte) 0, dataToSend);
             ResponseAPDU responsePrivate = ch.transmit(capdu);
             System.out.println("PERSONALIZATION_DATES: " + Integer.toHexString(responsePrivate.getSW()));
-
         }
 
         private void testPin(CardChannel ch) {
+            //Todo: generate PIN at random
 
             byte[] pin = {1, 2, 3, 4};
             try {
@@ -348,10 +469,6 @@ public class Terminal {
                 capdu = new CommandAPDU(CLASS, PERSONALIZATION_NEW_PIN, (byte) 0, (byte) 0, pin);
                 ResponseAPDU responsePrivate = ch.transmit(capdu);
                 System.out.println("PERSONALIZATION_NEW_PIN: " + Integer.toHexString(responsePrivate.getSW()));
-
-                //capdu = new CommandAPDU(CLASS, CREDIT_COMMIT_PIN, (byte) 0, (byte) 0, pin);
-                //responsePrivate = ch.transmit(capdu);
-                //System.out.println("Check pin: " + Integer.toHexString(responsePrivate.getSW()));
 
             } catch (Exception e) {
                 e.printStackTrace();
@@ -364,68 +481,67 @@ public class Terminal {
 
             byte [] nonceBytes = new byte[2];
             secureRandom.nextBytes(nonceBytes);
-            short firstShort = Util.makeShort(nonceBytes[0], nonceBytes[1]);
 
             // This is the signature of the Terminal
-            byte[] signedNonce = null;
-            try {
-                Signature signature = Signature.getInstance("SHA1withRSA", "BC");
-                signature.initSign(privateKeyTerminal);
-                signature.update(nonceBytes,0,nonceBytes.length);
-                signedNonce = signature.sign();
+            byte[] signedNonce = sign(nonceBytes);
+            byte[] nonceSignedNonce = new byte[nonceBytes.length + signedNonce.length];
 
-            }catch (Exception e){
-                e.printStackTrace();
-            }
-            byte[] combinedData = new byte[nonceBytes.length + signedNonce.length];
+            System.arraycopy(nonceBytes,0,nonceSignedNonce,0         ,nonceBytes.length);
+            System.arraycopy(signedNonce,0,nonceSignedNonce,nonceBytes.length,signedNonce.length);
 
-            System.arraycopy(nonceBytes,0,combinedData,0         ,nonceBytes.length);
-            System.arraycopy(signedNonce,0,combinedData,nonceBytes.length,signedNonce.length);
-
-
-            CommandAPDU hiAPDU = new CommandAPDU(CLASS, DECOMMISSIONING_HI, 0, 0, combinedData, combinedData.length);
+            CommandAPDU hiAPDU = new CommandAPDU(CLASS, DECOMMISSIONING_HI, 0, 0, nonceSignedNonce, nonceSignedNonce.length);
             ResponseAPDU responseAPDU = ch.transmit(hiAPDU);
             System.out.println("DECOMMISSIONING_HI: " + Integer.toHexString(responseAPDU.getSW()));
-
-            //TODO verify signature, send info backend
             byte [] dataRec = responseAPDU.getData();
-            short nonce = Util.makeShort(dataRec[0], dataRec[1]);
-            // +2 due to the backend increment algo the nonce
-            nonce = (short) (nonce+2);
-            short id = Util.makeShort(dataRec[2], dataRec[3]);
 
-            byte [] dataToSend = new byte[]{
-                    (byte) (nonce >> 8),
-                    (byte) nonce,
-                    (byte) (id >> 8),
-                    (byte) id
-
-            };
-
-            //TODO sign with terminla key
-            byte[] signdeBytes = null;
-            try {
-                Signature signature = Signature.getInstance("SHA1withRSA", "BC");
-                signature.initSign(privateKeyTerminal);
-                signature.update(dataToSend,0,dataToSend.length);
-                signdeBytes = signature.sign();
-
-            }catch (Exception e){
-                e.printStackTrace();
+            //Check if received nonce has been incremented
+            if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], dataRec[0], dataRec[1], 1)){
+                System.out.println("Nonce has not been incremeneted");
+                return;
             }
 
-            byte [] bytesApdu = new byte[128+4];
-            System.arraycopy(dataToSend,0, bytesApdu,0,4);
-            System.arraycopy(signdeBytes,0, bytesApdu,4,128);
+            //Verify signature
+            byte[] decomNonceIncremented = new byte[2];
+            Util.arrayCopy(dataRec, (short) 0, decomNonceIncremented, (short) 0, (short) 2);
+
+            byte[] decomNonceIncrementedSigned = new byte[dataRec.length-2];
+            Util.arrayCopy(dataRec, (short) 2, decomNonceIncrementedSigned, (short) 0, (short) (dataRec.length-2));
+
+            if (! verify(publicKeyCard, decomNonceIncremented, decomNonceIncrementedSigned)){
+                System.out.println("Signature verification failed");
+                return;
+            }
+
+            //Todo: send the received message to the backend
 
 
+            //Receive a message from the backend
+            byte[] nonceIncrementedSigned = new byte[2+500]; //Receive this from the backend
+            byte[] backendNonceIncremented = new byte[2];
+            Util.arrayCopy(nonceIncrementedSigned, (short) 0, backendNonceIncremented, (short) 0, (short) 2); //Copy the plaintext nonce of the backend
 
-            hiAPDU = new CommandAPDU(CLASS, DECOMMISSIONING_CLEAR, 0, 0, bytesApdu, bytesApdu.length);
+            //Check if nonce has been incremented
+            if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], backendNonceIncremented[0], backendNonceIncremented[1], 2)){
+                System.out.println("Nonce has not been incremented");
+                return;
+            }
+
+            short signatureSize = (short) (nonceIncrementedSigned.length-2);
+            byte[] backendNonceIncrementedSigned = new byte[signatureSize];
+            Util.arrayCopy(nonceIncrementedSigned, (short) 2, backendNonceIncrementedSigned, (short) 2, signatureSize);
+
+            //Check if the signature is valid
+            if (! verify(publicKeyBackend, backendNonceIncremented, backendNonceIncrementedSigned)){
+                System.out.println("Signature is not valid");
+                return;
+            }
+
+            //Forward this message to the card
+
+            hiAPDU = new CommandAPDU(CLASS, DECOMMISSIONING_CLEAR, 0, 0, nonceIncrementedSigned, nonceIncrementedSigned.length);
             responseAPDU = ch.transmit(hiAPDU);
             System.out.println("DECOMMISSIONING_CLEAR: " + Integer.toHexString(responseAPDU.getSW()));
-
-
-
+            
         }
 
 
