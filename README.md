@@ -60,6 +60,18 @@ The following commands can now be used (where `applet.cap` is the applet you wan
   ```
   java -jar gp.jar --deletedeps --delete 3B2963616C6300
   ```
+  
+# Card errors
+
+Here is a list of the errors the card can throw:
+
+- SW_VERIFICATION_FAILED (0x6300)
+- SW_PIN_VERIFICATION_REQUIRED (0x6301)
+- SW_TERMINAL_VERIFICATION_FAILED (0x6302)
+- SW_CARD_BLOCKED (0x6303)
+- SW_WRONG_NONCE (0x6304)
+- SW_NO_MORE_PIN_ATTEMPTS (0x6305)
+
 # Structure APDU messages
 
 ## SELECT command
@@ -77,7 +89,11 @@ Response APDU:
 | No data | 0x9000 | Successful processing |
 | | 0x6999 | Applet selection failed |
 
-## VERIFY HI command
+## Verification protocol 
+
+In this protocol we verify whether the card and the terminal are still valid 
+
+### 1. VERIFY HI command
 
 Command APDU:
 

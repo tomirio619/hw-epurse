@@ -290,8 +290,6 @@ public class Epurse extends Applet implements ISO7816 {
 
             // Check whether the terminal auth is verified
             if (sessionStatus[0] == TERMINAL_NO_AUTH) {
-
-
                 switch (headerBuffer[OFFSET_INS]) {
                     //Verification APDUs:
                     case VERIFICATION_HI:
@@ -408,6 +406,8 @@ public class Epurse extends Applet implements ISO7816 {
      * @param apdu
      */
     private void processVerificationV(APDU apdu) {
+
+        //Todo: check the nonce being incremented
 
         short datalength = (short) (headerBuffer[OFFSET_LC] & 0x00FF);
         readBuffer(apdu, transientBuffer, (short) 0, datalength);

@@ -1,8 +1,7 @@
 import javafx.scene.control.Alert;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import javax.xml.bind.DatatypeConverter;
+import java.io.*;
 import java.net.Socket;
 
 /**
@@ -20,7 +19,7 @@ public class BackEndCommunicator extends Thread{
 
     private void setUp(){
         try {
-            socket = new Socket("127.0.0.1", 76395);
+            socket = new Socket("127.0.0.1", 9090);
             outToServer = socket.getOutputStream();
             inFromServer = socket.getInputStream();
         } catch (IOException e) {
@@ -36,8 +35,28 @@ public class BackEndCommunicator extends Thread{
      * @param data
      * @return
      */
-    private byte[] sendAndReceive(byte[] data) throws IOException {
-        outToServer.write(data);
+    public byte[] sendAndReceive(byte[] data) {
+        try {
+            System.out.println("Sending data of length " + data.length);
+            System.out.println(DatatypeConverter.printHexBinary(data));
+            DataOutputStream dOut = new DataOutputStream(outToServer);
+            dOut.writeInt(data.length);
+            dOut.write(data);
+
+            DataInputStream dIn = new DataInputStream(inFromServer);
+
+            int count;
+            byte[] buffer = new byte[8192]; // or 4096, or more
+            while ((count = dIn.read(buffer)) > 0)
+            {
+                dOut.write(buffer, 0, count);
+            }
+
+            return buffer;
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
         return null;
     }
 
