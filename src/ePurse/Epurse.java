@@ -2,6 +2,7 @@ package ePurse;
 
 import javacard.framework.*;
 import javacard.security.*;
+import javacardx.crypto.Cipher;
 
 /**
  * @noinspection ClassNamePrefixedWithPackageName, ImplicitCallToSuper, MethodOverridesStaticMethodOfSuperclass, ResultOfObjectAllocationIgnored
@@ -52,7 +53,7 @@ public class Epurse extends Applet implements ISO7816 {
 
     /** wrong terminal nonce */
     final static short SW_WRONG_NONCE = 0x6304;
-    final static short SW_NO_MORE_PIN_ATTEMPTS = 0x6305;
+    final static short SW_NO_MORE_PIN_ATTEMPTS = 0x6305;  //TODO we need to reset pin
 
     /**
      * State bytes
@@ -85,6 +86,7 @@ public class Epurse extends Applet implements ISO7816 {
     private RSAPrivateKey privKey;
     private RSAPublicKey backEndKey;
     private RSAPublicKey terminalKey;
+    Cipher cipher;
 
     /**
      * PIN primitives
@@ -106,16 +108,20 @@ public class Epurse extends Applet implements ISO7816 {
     private byte[] id = new byte[2];
     private byte[] date = new byte[4];
     private byte[] expirationDate = new byte[4];
-    private byte[] amount = new byte[2];
+    private byte[] balance = new byte[2];
+
     /**
      * The applet state (RAW, PERSONALIZED or DECOMMISSIONED).
      */
     private byte status;
 
+
     /**
      * Ram volatile variables
      */
     byte[] lastNonce;
+    private byte[] amount; //= new byte[2];
+
     /**
      * The communication state (auth or not)
      */
@@ -130,12 +136,14 @@ public class Epurse extends Applet implements ISO7816 {
         headerBuffer = JCSystem.makeTransientByteArray((short) 5, JCSystem.CLEAR_ON_RESET);
         sessionStatus = JCSystem.makeTransientByteArray((short) 1, JCSystem.CLEAR_ON_RESET);
         lastNonce = JCSystem.makeTransientByteArray((short)2,JCSystem.CLEAR_ON_RESET);
+        amount = JCSystem.makeTransientByteArray((short)2,JCSystem.CLEAR_ON_RESET);
 
         pubKey = (RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC, KeyBuilder.LENGTH_RSA_1024, false);
         privKey = (RSAPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PRIVATE, KeyBuilder.LENGTH_RSA_1024, false);
         backEndKey = (RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC, KeyBuilder.LENGTH_RSA_1024, false);
         terminalKey = (RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC, KeyBuilder.LENGTH_RSA_1024, false);
 
+        cipher = Cipher.getInstance(Cipher.ALG_RSA_PKCS1, false);
         pin = new OwnerPIN((byte) 3, (byte) 4);
 
         status = STATE_RAW;
@@ -344,7 +352,7 @@ public class Epurse extends Applet implements ISO7816 {
                         break;
                     case CREDIT_COMMIT_PIN:
                         checkPIN(apdu);
-                        processCommitPayment(apdu);
+                        processCommitPaymentPIN(apdu);
                         break;
                     case CREDIT_COMMIT_NO_PIN:
                         processCommitPayment(apdu);
@@ -433,7 +441,7 @@ public class Epurse extends Applet implements ISO7816 {
         // Build original signed message with the public key of the card [NONCE,PKC, PKT]
         Util.arrayCopy(bytesTermKeyStored, (short)0, transientBuffer, NONCE_LENGTH, (short) bytesTermKeyStored.length);
         // TODO nonce + 1 or +2 ??
-        
+
         //TODO: verify [NONCE,PKC, PKT] with received sign
         boolean isVerified = verify(bytesTermKeyStored, (short) 0, (short) ((short) bytesTermKeyStored.length + NONCE_LENGTH), transientBuffer, (short) 0, (short) 128, backEndKey);
         if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);
@@ -574,22 +582,66 @@ public class Epurse extends Applet implements ISO7816 {
 
     }
 
+    private void processCommitPaymentPIN(APDU apdu){
+
+        readBuffer(apdu, transientBuffer, (short)0,(short) (headerBuffer[OFFSET_LC] & 0x00FF) );
+        if(headerBuffer[ISO7816.OFFSET_P1]==0) {
+            // Verify nonce, increment and save it to send in the second apdu
+            incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short) 2);
+
+            // amount is what you should pay and balance is what you have aftewards
+            //Received [nonce + amount + balance encripted(signed(pin))] 6+128
+
+            //Initialize cipher
+            byte[] pinBytes = new byte[128];
+            cipher.init(privKey, Cipher.MODE_DECRYPT);
+            cipher.doFinal(transientBuffer, (short) 6, (short) 128, pinBytes, (short) 0);
+
+            // Verify pin
+            // If signature verification not verified throw exception
+            if (!pin.check(pinBytes, (short) 0, PIN_LENGTH)) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+
+            //Get new balance and amount
+            Util.arrayCopy(transientBuffer, (short) 2, amount, (short) 0, (short) 2);
+            //Util.arrayCopy(transientBuffer, (short) 4, balance, (short) 0, (short) 2);
+
+        }else if (headerBuffer[ISO7816.OFFSET_P1]==1){
+
+            // TODO responde with id amount sigen
+            // in the second apdu we receive the nonec amount balance signed
+            byte[] payload = new byte[6];
+
+            Util.arrayCopy(lastNonce, (short) 0, payload, (short) 0, (short) 2);
+            Util.arrayCopy(amount, (short) 0, payload, (short) 2, (short) 2);
+            //Util.arrayCopy(balance, (short) 0, payload, (short) 4, (short) 2);
+            //datalength = (short) (datalength + 2);
+
+            boolean payloadVerified = verify(payload, (short) 0, (short) 6, transientBuffer,(short)0, (short) 128, terminalKey );
+            if (!payloadVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+
+            short sBalance = Util.makeShort(balance[0], balance[1]);
+            short sAmount = Util.makeShort(amount[0], amount[1]);
+            if(sBalance-sAmount<0) ISOException.throwIt(SW_DATA_INVALID);
+
+            // Copi nonde id and amount to sing
+            Util.arrayCopy(lastNonce, (short) 0, transientBuffer, (short) 0, (short) 2);
+            Util.arrayCopy(id, (short) 0, transientBuffer, (short) 2, (short) 2);
+            Util.arrayCopy(amount, (short) 0, transientBuffer, (short) 4, (short) 2);
+
+            // We sing wit offset 2 to prevent the overridign of the nonce
+            short signedResponseLength = sign(transientBuffer, (short) 0, (short) 6, transientBuffer,(short)2);
+
+            //Send the response
+            apdu.setOutgoing();
+            apdu.setOutgoingLength((short) (2 + signedResponseLength));
+            apdu.sendBytesLong(transientBuffer, (short) 0, (short) (2 + signedResponseLength));
+
+        }else ISOException.throwIt(SW_COMMAND_NOT_ALLOWED);
+
+    }
+
     private void processCommitPayment(APDU apdu){
-        // Verify nonce
-        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)2);
 
-        //Get new balance
-        Util.arrayCopy(transientBuffer, (short) 4, amount, (short) 0, (short) 2);
-
-        Util.arrayCopy(id, (short) 0, transientBuffer, (short) 4, (short) 2);
-        //datalength = (short) (datalength + 2);
-
-        short signatureSize = sign(transientBuffer, (short) 0, (short)6, transientBuffer, (short)6);
-
-        //Send the response
-        apdu.setOutgoing();
-        apdu.setOutgoingLength((short) (6 + signatureSize));
-        apdu.sendBytesLong(transientBuffer, (short) 0, (short) (6 + signatureSize));
     }
 
     private void processDecommissioningClear(APDU apdu) {
