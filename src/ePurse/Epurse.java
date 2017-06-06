@@ -12,6 +12,7 @@ public class Epurse extends Applet implements ISO7816 {
      * Instruction bytes
      */
     private final static byte EPURSE_CLA = (byte) 0xba;
+    private final static byte PERSONALIZATION_BACKEND_KEY = (byte) 0x20;
     private final static byte PERSONALIZATION_HI = (byte) 0x30;
     private final static byte PERSONALIZATION_DATES = (byte) 0x31;
     private final static byte PERSONALIZATION_NEW_PIN = (byte) 0x32;
@@ -35,7 +36,6 @@ public class Epurse extends Applet implements ISO7816 {
     private final static byte KEYPAIR_PRIVATE_RSA = (byte) 0x45;
 
     private final static byte DECRYPTION_KEY = (byte) 0x44;
-    private final static byte BACKEND_KEY = (byte) 0x46;
 
 
     private final static byte SELECT = (byte) 0xA4;
@@ -52,10 +52,7 @@ public class Epurse extends Applet implements ISO7816 {
 
     /** wrong terminal nonce */
     final static short SW_WRONG_NONCE = 0x6304;
-
     final static short SW_NO_MORE_PIN_ATTEMPTS = 0x6305;
-
-
 
     /**
      * State bytes
@@ -76,78 +73,72 @@ public class Epurse extends Applet implements ISO7816 {
      * Transient buffer
      */
     private byte[] transientBuffer;
+    private byte[] headerBuffer;
 
     /**
      * Cryptographic primitives
      */
-    private Signature signingKey;
+    //private Signature signingKey;
 
     private Signature signature;
-
     private RSAPublicKey pubKey;
-
     private RSAPrivateKey privKey;
-
     private RSAPublicKey backEndKey;
     private RSAPublicKey terminalKey;
 
-
-    private RSAPrivateKey decryptionKey;
-
-    private byte[] headerBuffer;
-
-
+    /**
+     * PIN primitives
+     */
     private OwnerPIN pin;
     private final static byte PIN_LENGTH = (byte) 4;
+    private final static byte ID_LENGTH = (byte) 2;
+    private final static byte NONCE_LENGTH = (byte) 2;
+    private final static byte AMOUNT_LENGTH = (byte) 2;
+    private final static byte DATE_LENGTH = (byte) 8;
+    private final static short MODULUS_LENGTH = 128;
+    private final static short PRIVATE_EXPONENT_LENGTH = 128;
+    private final static byte PUBLIC_EXPONENT_LENGTH = 3; // TODO Is 3 or 4??
 
+
+    /**
+     * Eprom persisten variables
+     */
+    private byte[] id = new byte[2];
+    private byte[] date = new byte[4];
+    private byte[] expirationDate = new byte[4];
+    private byte[] amount = new byte[2];
     /**
      * The applet state (RAW, PERSONALIZED or DECOMMISSIONED).
      */
     private byte status;
+
+    /**
+     * Ram volatile variables
+     */
+    byte[] lastNonce;
     /**
      * The communication state (auth or not)
      */
     byte[] sessionStatus;
 
-    private final static byte ID_LENGTH = (byte) 2;
-    private final static byte NONCE_LENGTH = (byte) 2;
-    private final static byte AMOUNT_LENGTH = (byte) 2;
-    private final static byte DATE_LENGTH = (byte) 8;
-
-    private byte[] id = new byte[2];
-    private byte[] date = new byte[4];
-    private byte[] expirationDate = new byte[4];
-    private byte[] amount = new byte[2];
-
-    byte[] lastNonce;
-
-
     /**
      * Constructor
      */
     public Epurse() {
+
         transientBuffer = JCSystem.makeTransientByteArray((short) 256, JCSystem.CLEAR_ON_RESET);
         headerBuffer = JCSystem.makeTransientByteArray((short) 5, JCSystem.CLEAR_ON_RESET);
-        pubKey = (RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC,
-                KeyBuilder.LENGTH_RSA_1024, false);
-        privKey = (RSAPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PRIVATE,
-                KeyBuilder.LENGTH_RSA_1024, false);
-
-        backEndKey = (RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC,
-                KeyBuilder.LENGTH_RSA_1024, false);
-        terminalKey = (RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC,
-                KeyBuilder.LENGTH_RSA_1024, false);
-
-        signingKey = Signature.getInstance(KeyPair.ALG_RSA, false);
-        pin = new OwnerPIN((byte) 3, (byte) 4);
-
-        //TODO: state for testing, change to RAW
-        status = STATE_RAW;
-
         sessionStatus = JCSystem.makeTransientByteArray((short) 1, JCSystem.CLEAR_ON_RESET);
         lastNonce = JCSystem.makeTransientByteArray((short)2,JCSystem.CLEAR_ON_RESET);
 
+        pubKey = (RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC, KeyBuilder.LENGTH_RSA_1024, false);
+        privKey = (RSAPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PRIVATE, KeyBuilder.LENGTH_RSA_1024, false);
+        backEndKey = (RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC, KeyBuilder.LENGTH_RSA_1024, false);
+        terminalKey = (RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC, KeyBuilder.LENGTH_RSA_1024, false);
 
+        pin = new OwnerPIN((byte) 3, (byte) 4);
+
+        status = STATE_RAW;
 
         register();
     }
@@ -164,7 +155,9 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
     public boolean select() {
-        return true;
+        // Check whether there still some pin tries (max 3)
+        if(pin.getTriesRemaining()>0) return true;
+        else return false;
     }
 
     /**
@@ -233,7 +226,7 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
     /**
-     * Sign a payload starting from the offset with the length of the payload
+     * Verify a payload starting from the offset with the length of the payload
      *
      * @param source      The data to sign
      * @param plainOffset The offset
@@ -250,7 +243,7 @@ public class Epurse extends Applet implements ISO7816 {
 
 
     /**
-     * @noinspection UnusedDeclaration
+     * @noinspection Process the apdu
      */
     public void process(APDU apdu) {
 
@@ -264,9 +257,9 @@ public class Epurse extends Applet implements ISO7816 {
         // Check whether you are in the personalization state
         if (status == STATE_RAW) {
             switch (headerBuffer[OFFSET_INS]) {
-                //TODO: after test this will go inside the personalization
-                case BACKEND_KEY: {
-                    insBackendKey(apdu);
+
+                case PERSONALIZATION_BACKEND_KEY: {
+                    saveBackendKey(apdu);
                     break;
                 }
                 // Personalization APDUs:
@@ -319,11 +312,6 @@ public class Epurse extends Applet implements ISO7816 {
                     }
                     case KEYPAIR_PRIVATE: {
                         insKeyPairPrivate(apdu);
-                        break;
-                    }
-
-                    case DECRYPTION_KEY: {
-                        insDecryptionKey(apdu);
                         break;
                     }
 
@@ -393,7 +381,6 @@ public class Epurse extends Applet implements ISO7816 {
         datalength = (short) (datalength + 2);
 
         short signatureSize = sign(transientBuffer, (short) 0, datalength, transientBuffer, datalength);
-        //short signatureSize = signature.sign(transientBuffer, (short) 0, (short) 3, transientBuffer, (short) 4);
 
         //Send the response
         apdu.setOutgoing();
@@ -420,7 +407,7 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
     /**
-     * Verify terminal key with the backent signature
+     * Verify terminal key with the Backend signature
      *
      * @param apdu
      */
@@ -430,12 +417,13 @@ public class Epurse extends Applet implements ISO7816 {
         readBuffer(apdu, transientBuffer, (short) 0, datalength);
 
         // Get teminal key data stored
-        byte[] bytesTermKeyStored = new byte[128 + 3];
-        terminalKey.getExponent(bytesTermKeyStored, (short) 0);
-        terminalKey.getModulus(bytesTermKeyStored, (short) 3);
+        byte[] bytesTermKeyStored = new byte[(MODULUS_LENGTH + PUBLIC_EXPONENT_LENGTH)*2];
+        pubKey.getExponent(bytesTermKeyStored, (short)NONCE_LENGTH);
+        pubKey.getModulus(bytesTermKeyStored, (short)PUBLIC_EXPONENT_LENGTH);
+        terminalKey.getExponent(bytesTermKeyStored,((short)(PUBLIC_EXPONENT_LENGTH+MODULUS_LENGTH)));
+        terminalKey.getModulus(bytesTermKeyStored, ((short) (PUBLIC_EXPONENT_LENGTH*2+PUBLIC_EXPONENT_LENGTH)));
 
         // TODO: Build original signed message with the public key of the card [NONCE,PKC, PKT]
-
 
         //TODO: verify [NONCE,PKC, PKT] with received sign
         boolean isVerified = verify(bytesTermKeyStored, (short) 0, (short) 131, transientBuffer, (short) 0, (short) 128, backEndKey);
@@ -472,9 +460,10 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
     /**
+     * Store the public key of the Backend within the personalization phase
      * @param apdu
      */
-    private void insBackendKey(APDU apdu) {
+    private void saveBackendKey(APDU apdu) {
         short datalength = (short) (headerBuffer[OFFSET_LC] & 0x00FF);
         Util.arrayCopy(apdu.getBuffer(), OFFSET_CDATA, transientBuffer, (short) 0, datalength);
 
@@ -492,17 +481,6 @@ public class Epurse extends Applet implements ISO7816 {
 
         }*/
 
-    }
-
-
-    private void insDecryptionKey(APDU apdu) {
-        short datalength = (short) headerBuffer[OFFSET_LC];
-        Util.arrayCopy(apdu.getBuffer(), OFFSET_CDATA, transientBuffer, (short) 0, datalength);
-        short exponentLength = headerBuffer[OFFSET_P1];
-        short modulusLength = headerBuffer[OFFSET_P2];
-
-        decryptionKey.setExponent(transientBuffer, (short) 0, exponentLength);
-        decryptionKey.setModulus(transientBuffer, exponentLength, modulusLength);
     }
 
     /**
@@ -609,7 +587,7 @@ public class Epurse extends Applet implements ISO7816 {
         readBuffer(apdu, transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
 
         // Verify with received signature
-        boolean isVerified = verify(transientBuffer, (short) 0, (short) 4, transientBuffer, (short) 4, (short) 128, terminalKey);
+        boolean isVerified = verify(transientBuffer, (short) 0, (short) 4, transientBuffer, (short) 4, (short) 128, backEndKey); // Changed to bekey
         // If signature verification not verified throw exception
         if (!isVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
