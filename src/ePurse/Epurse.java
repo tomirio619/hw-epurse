@@ -641,6 +641,23 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
     private void processCommitPayment(APDU apdu){
+        // Receive amount and nonce
+
+        readBuffer(apdu, transientBuffer, (short)0,(short) (headerBuffer[OFFSET_LC] & 0x00FF) );
+
+        // Verify data received
+        boolean payloadVerified = verify(transientBuffer, (short) 0, (short) 4, transientBuffer,(short)4, (short) 128, terminalKey ); // TODO terminal or bend?
+        if (!payloadVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short) 2);
+
+
+        short sBalance = Util.makeShort(balance[0], balance[1]);
+        short sAmount = Util.makeShort(amount[0], amount[1]);
+        if(sBalance-sAmount<0) ISOException.throwIt(SW_DATA_INVALID);
+
+
+        //response noce cardid amount
 
     }
 

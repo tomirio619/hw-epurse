@@ -70,7 +70,7 @@ public class GenKeyPair {
 			pw.println("\""+sk.getModulus().toString(16)+"\";");
 
 			pw.print("\tpublic static final String publicExponentBackend = ");
-			pw.println("\""+sk.getPublicExponent().toString(10)+"\";");
+			pw.println("\""+sk.getPublicExponent().toString(16)+"\";");
 			pw.println("}");
 
 
