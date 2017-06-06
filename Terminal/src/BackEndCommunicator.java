@@ -45,11 +45,11 @@ public class BackEndCommunicator extends Thread{
 
             DataInputStream dIn = new DataInputStream(inFromServer);
 
-            int count;
-            byte[] buffer = new byte[8192]; // or 4096, or more
-            while ((count = dIn.read(buffer)) > 0)
-            {
-                dOut.write(buffer, 0, count);
+            int length = dIn.readInt();
+            byte[] buffer = null;
+            if (length > 0){
+                buffer = new byte[length];
+                dIn.readFully(buffer, 0, length);
             }
 
             return buffer;
