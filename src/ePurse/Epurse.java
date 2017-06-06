@@ -314,6 +314,11 @@ public class Epurse extends Applet implements ISO7816 {
                         insKeyPairPrivate(apdu);
                         break;
                     }
+                    case DECRYPTION_KEY: {
+                        insDecryptionKey(apdu);
+                        break;
+                        //Verification APDUs:
+                    }
 
                     //Decommissioning APDUs:
                     case DECOMMISSIONING_HI:
@@ -626,6 +631,20 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
 
+    /**
+     *
+     * @param apdu
+     */
+    private void insDecryptionKey(APDU apdu) {
+        short datalength = (short) headerBuffer[OFFSET_LC];
+        Util.arrayCopy(apdu.getBuffer(), OFFSET_CDATA, transientBuffer, (short) 0, datalength);
+        short exponentLength = headerBuffer[OFFSET_P1];
+        short modulusLength = headerBuffer[OFFSET_P2];
+
+        //TODO which is the decription key, card private key??
+        //decryptionKey.setExponent(transientBuffer, (short) 0, exponentLength);
+        //decryptionKey.setModulus(transientBuffer, (short) (exponentLength + 1), modulusLength);
+    }
 
     /**
      * Read apdu buffer and store into a different array
