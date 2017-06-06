@@ -99,7 +99,7 @@ public class Epurse extends Applet implements ISO7816 {
     private final static byte DATE_LENGTH = (byte) 8;
     private final static short MODULUS_LENGTH = 128;
     private final static short PRIVATE_EXPONENT_LENGTH = 128;
-    private final static byte PUBLIC_EXPONENT_LENGTH = 3; // TODO Is 3 or 4??
+    private final static byte PUBLIC_EXPONENT_LENGTH = 5; // TODO Is 3 or 4??
 
 
     /**
@@ -286,8 +286,6 @@ public class Epurse extends Applet implements ISO7816 {
             }
 
         } else if (status == STATE_PERSONALIZED) {
-
-
             // Check whether the terminal auth is verified
             if (sessionStatus[0] == TERMINAL_NO_AUTH) {
                 switch (headerBuffer[OFFSET_INS]) {
@@ -407,16 +405,17 @@ public class Epurse extends Applet implements ISO7816 {
      */
     private void processVerificationV(APDU apdu) {
 
-        //Todo: check the nonce being incremented
-
         short datalength = (short) (headerBuffer[OFFSET_LC] & 0x00FF);
         readBuffer(apdu, transientBuffer, (short) 0, datalength);
 
         short exponentLength = (short) (headerBuffer[OFFSET_P1] & 0x00FF);
         short modulusLength = (short) (headerBuffer[OFFSET_P2] & 0x00FF);
 
-        terminalKey.setExponent(transientBuffer, (short) 0, exponentLength);
-        terminalKey.setModulus(transientBuffer, exponentLength, modulusLength);
+        terminalKey.setExponent(transientBuffer, (short) 2, exponentLength);
+        terminalKey.setModulus(transientBuffer, (short) (2+exponentLength), modulusLength);
+
+        lastNonce[0] = transientBuffer[0];
+        lastNonce[1] = transientBuffer[1];
     }
 
     /**
@@ -429,22 +428,23 @@ public class Epurse extends Applet implements ISO7816 {
         short datalength = (short) (headerBuffer[OFFSET_LC] & 0x00FF);
         readBuffer(apdu, transientBuffer, (short) 0, datalength);
 
-        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)2);
-
         // Get teminal key data stored
-        byte[] bytesTermKeyStored = new byte[(MODULUS_LENGTH + PUBLIC_EXPONENT_LENGTH)*2];
-        pubKey.getExponent(bytesTermKeyStored, (short)NONCE_LENGTH);
-        pubKey.getModulus(bytesTermKeyStored, (short)PUBLIC_EXPONENT_LENGTH);
-        terminalKey.getExponent(bytesTermKeyStored,((short)(PUBLIC_EXPONENT_LENGTH+MODULUS_LENGTH)));
-        terminalKey.getModulus(bytesTermKeyStored, ((short) (PUBLIC_EXPONENT_LENGTH*2+PUBLIC_EXPONENT_LENGTH)));
+        byte[] bytesTermKeyStored = new byte[(MODULUS_LENGTH + PUBLIC_EXPONENT_LENGTH)*2+2];
+        Util.arrayCopy(lastNonce, (short) 0, bytesTermKeyStored, (short) 0, (short) 2);
+        pubKey.getExponent(bytesTermKeyStored, (short) (NONCE_LENGTH));
+        pubKey.getModulus(bytesTermKeyStored, (short) (NONCE_LENGTH+PUBLIC_EXPONENT_LENGTH));
+        terminalKey.getExponent(bytesTermKeyStored,((short)(NONCE_LENGTH+PUBLIC_EXPONENT_LENGTH+MODULUS_LENGTH)));
+        terminalKey.getModulus(bytesTermKeyStored, ((short) (NONCE_LENGTH+PUBLIC_EXPONENT_LENGTH*2+MODULUS_LENGTH)));
 
-        // Build original signed message with the public key of the card [NONCE,PKC, PKT]
-        Util.arrayCopy(bytesTermKeyStored, (short)0, transientBuffer, NONCE_LENGTH, (short) bytesTermKeyStored.length);
+//        // Build original signed message with the public key of the card [NONCE,PKC, PKT]
+//        Util.arrayCopy(bytesTermKeyStored, (short) 0, transientBuffer, (short) NONCE_LENGTH, (short) bytesTermKeyStored.length);
         // TODO nonce + 1 or +2 ??
 
         //TODO: verify [NONCE,PKC, PKT] with received sign
-        boolean isVerified = verify(bytesTermKeyStored, (short) 0, (short) ((short) bytesTermKeyStored.length + NONCE_LENGTH), transientBuffer, (short) 0, (short) 128, backEndKey);
-        if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);
+        boolean isVerified = verify(bytesTermKeyStored, (short) 0, ((short) bytesTermKeyStored.length), transientBuffer, (short) 0, (short) 128, backEndKey);
+        if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);         
+
+        incrementNumberAndStore(lastNonce[0], lastNonce[1], (short) 0);
     }
 
     /**
@@ -621,7 +621,7 @@ public class Epurse extends Applet implements ISO7816 {
 
             short sBalance = Util.makeShort(balance[0], balance[1]);
             short sAmount = Util.makeShort(amount[0], amount[1]);
-            if(sBalance-sAmount<0) ISOException.throwIt(SW_DATA_INVALID);
+            if((short) (sBalance-sAmount) < (short) 0) ISOException.throwIt(SW_DATA_INVALID);
 
             // Copi nonde id and amount to sing
             Util.arrayCopy(lastNonce, (short) 0, transientBuffer, (short) 0, (short) 2);

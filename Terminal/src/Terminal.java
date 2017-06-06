@@ -376,13 +376,15 @@ public class Terminal extends Thread implements IObservable {
         CommandAPDU capdu;
         ResponseAPDU responsePrivate;
 
-        byte[] dataToSend = new byte[2 + publicKeyCardBytes.length];
+        byte[] dataToSend = new byte[2 + publicKeyTerminalBytes.length];
         dataToSend[0] = v[0];
         dataToSend[1] = v[1];
-        Util.arrayCopy(publicKeyCardBytes, (short) 0, dataToSend, (short) 2, (short) publicKeyCardBytes.length);
+        Util.arrayCopy(publicKeyTerminalBytes, (short) 0, dataToSend, (short) 2, (short) publicKeyTerminalBytes.length);
+
+        System.out.println(Util.makeShort(dataToSend[0], dataToSend[1]));
 
         // Send public key of the terminal extrated from the plaintext
-        capdu = new CommandAPDU(CLASS, VERIFICATION_V, (byte) exponentBytes.length, (byte) modulusBytes.length, publicKeyTerminalBytes);
+        capdu = new CommandAPDU(CLASS, VERIFICATION_V, (byte) exponentBytes.length, (byte) modulusBytes.length, dataToSend);
         responsePrivate = ch.transmit(capdu);
         System.out.println("VERIFICATION_V: " + Integer.toHexString(responsePrivate.getSW()));
 
@@ -465,7 +467,7 @@ public class Terminal extends Thread implements IObservable {
 
         /*
         TODO: Request unique ID from the backend, send public key to the backend
-        In this format: publickey card || expiration date (in seconds) || implicit request for Id
+        In this format: publickey card (send as encoded!) || expiration date (in seconds) || implicit request for Id
          */
 
 
