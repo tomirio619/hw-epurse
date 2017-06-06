@@ -441,8 +441,10 @@ public class Epurse extends Applet implements ISO7816 {
         // TODO nonce + 1 or +2 ??
 
         //TODO: verify [NONCE,PKC, PKT] with received sign
+
+        //FIXME: 6f00 in the next line ...
         boolean isVerified = verify(bytesTermKeyStored, (short) 0, ((short) bytesTermKeyStored.length), transientBuffer, (short) 0, (short) 128, backEndKey);
-        if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);         
+        if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);
 
         incrementNumberAndStore(lastNonce[0], lastNonce[1], (short) 0);
     }
