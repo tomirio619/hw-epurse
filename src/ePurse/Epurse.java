@@ -421,6 +421,8 @@ public class Epurse extends Applet implements ISO7816 {
         short datalength = (short) (headerBuffer[OFFSET_LC] & 0x00FF);
         readBuffer(apdu, transientBuffer, (short) 0, datalength);
 
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)2);
+
         // Get teminal key data stored
         byte[] bytesTermKeyStored = new byte[(MODULUS_LENGTH + PUBLIC_EXPONENT_LENGTH)*2];
         pubKey.getExponent(bytesTermKeyStored, (short)NONCE_LENGTH);
@@ -428,10 +430,12 @@ public class Epurse extends Applet implements ISO7816 {
         terminalKey.getExponent(bytesTermKeyStored,((short)(PUBLIC_EXPONENT_LENGTH+MODULUS_LENGTH)));
         terminalKey.getModulus(bytesTermKeyStored, ((short) (PUBLIC_EXPONENT_LENGTH*2+PUBLIC_EXPONENT_LENGTH)));
 
-        // TODO: Build original signed message with the public key of the card [NONCE,PKC, PKT]
-
+        // Build original signed message with the public key of the card [NONCE,PKC, PKT]
+        Util.arrayCopy(bytesTermKeyStored, (short)0, transientBuffer, NONCE_LENGTH, (short) bytesTermKeyStored.length);
+        // TODO nonce + 1 or +2 ??
+        
         //TODO: verify [NONCE,PKC, PKT] with received sign
-        boolean isVerified = verify(bytesTermKeyStored, (short) 0, (short) 131, transientBuffer, (short) 0, (short) 128, backEndKey);
+        boolean isVerified = verify(bytesTermKeyStored, (short) 0, (short) ((short) bytesTermKeyStored.length + NONCE_LENGTH), transientBuffer, (short) 0, (short) 128, backEndKey);
         if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);
     }
 
