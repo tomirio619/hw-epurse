@@ -89,17 +89,34 @@ Response APDU:
 | No data | 0x9000 | Successful processing |
 | | 0x6999 | Applet selection failed |
 
+## Personalisation protocol
+
+### 3. Publickey and request card
+
+In this part the terminal communicates the public key of the newly created card and requests a key
+
+This consists of the following:
+
+Payload: publickey card || expiration date (in seconds) || implicit request for Id
+
+Response: card id
+
 ## Verification protocol 
 
 In this protocol we verify whether the card and the terminal are still valid 
 
-### 1. VERIFY HI command
+### 1. VERIFY HI command (T - C)
 
 Command APDU:
 
 | CLA | INS | P1 | P2 | Lc | Data field | Le |
 | ----|:---:| --:|--:| --:| --:| --:|
 | 0xB0 | 0x41 | 0x0 | 0x0 | 0x0 | 0x0 | N/A |
+
+Plaintext: nonce 
+Payload is: Plaintext 
+
+This is not signed because we don't have the public key of the terminal.
 
 Response APDU:
 
@@ -108,7 +125,76 @@ Response APDU:
 | No data | 0xx9000 | Successful processing |
 | | 0x6300 | Verification failed |
 
+### 2. Cid command (C - T)
 
+Command APDU:
+
+| CLA | INS | P1 | P2 | Lc | Data field | Le |
+| ----|:---:| --:|--:| --:| --:| --:|
+| 0xB0 | 0x41 | 0x0 | 0x0 | 0x0 | 0x0 | N/A |
+
+Plaintext: nonce 
+Payload is: Plaintext 
+
+This is not signed because we don't have the public key of the terminal.
+
+Response APDU:
+
+| Optional | Status word | Meaning |
+| ----|:---:| --:|
+| No data | 0xx9000 | Successful processing |
+| | 0x6300 | Verification failed |
+
+### 3. Ta to backend ( T - BE )
+
+We send the received APDU of the card and the one crafted by the terminal to the backend for a verification.
+
+PlaintextA: Nonce || CardId
+PlaintextB: Nonce+1 || TerminalId
+Payload: PlaintextA || [PlaintextA]_Signed || PlaintextB || [PlaintextB]_Signed
+
+The backend does some checks and returns the public key of the card and the public key of the terminal, also signed by the backend:
+
+PlaintextResponse = Nonce+2 || public key card (exponent + modulus) || public key terminal (exponent + modulus)
+PayloadResponse = [PlaintextResponse]_Signed
+
+## Decommisioning protocol
+
+### 2. Request for deletion ( T - BE )
+
+The terminal forwards the decom request signed by the card
+
+Plaintext: Nonce+1 || CardId
+Payload: [Plaintext]_Signed
+
+Response: [nonce incremented || Implicit OK] signed by the backend, this is forwarded to the smartcard
+
+## Reloading protocol 
+
+### 3. Requests balance of a card
+
+The terminal forwards the request of a card to view his balance
+
+Plaintext: Nonce+1 || CardId
+Payload: [Plaintext]_signed
+
+Response: [Nonce incremented || correct balance ] signed by the backend
+
+
+## Credit protocol 
+
+### 2. Requests balance of card 
+
+See in reloading, response is similar
+
+### 3. Store the payment commitment 
+
+In this step the backened receives a commitment of card that it will pay a certain amount.
+
+Plaintext: Nonce || CardId || Amount 
+Payload: [Plaintext]_Signed
+
+Response: [Nonce incremented || Implicit OK] signed by the backend
 
 ## CREDIT command
 

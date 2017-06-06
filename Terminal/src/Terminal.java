@@ -435,7 +435,11 @@ public class Terminal extends Thread implements IObservable {
                 (byte) expirationTime
         };
 
-        //TODO: Request unique ID from the backend, send public key to the backend
+        /*
+        TODO: Request unique ID from the backend, send public key to the backend
+        In this format: publickey card || expiration date (in seconds) || implicit request for Id
+         */
+
 
         //Receive id of the card
         byte[] id = new byte[]{
