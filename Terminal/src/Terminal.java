@@ -126,9 +126,22 @@ public class Terminal extends Thread implements IObservable {
                             publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
 
                             //Todo: fix the hardcoded key
-                            loadCardKeys();
+//                            RSAPublicKey loadedPublicKey =  loadCardKeys();
 
                             testTerminalAuth();
+//
+//                            byte[] data = new byte[]{0x42};
+//                            byte[] signed = sign(privateKeyCard, data);
+//                            byte[] dataAndSigned = new byte[1+128];
+//                            Util.arrayCopy(data, (short) 0, dataAndSigned, (short) 0 , (short) 1);
+//                            Util.arrayCopy(signed, (short) 0, dataAndSigned, (short) 1, (short) 128);
+//                            handleSignature(loadedPublicKey, 1, dataAndSigned);
+//
+//                            signed = sign(privateKeyCard, data);
+//                            dataAndSigned = new byte[1+128];
+//                            Util.arrayCopy(data, (short) 0, dataAndSigned, (short) 0 , (short) 1);
+//                            Util.arrayCopy(signed, (short) 0, dataAndSigned, (short) 1, (short) 128);
+//                            handleSignature(publicKeyCard, 1, dataAndSigned);
 
                             testReloading();
 
@@ -213,7 +226,7 @@ public class Terminal extends Thread implements IObservable {
         return data;
     }
 
-    private void loadCardKeys(){
+    private RSAPublicKey loadCardKeys(){
         //First generate test terminal keypair
         BigInteger modulus = new BigInteger(CardKeys.modulus, 16);
         BigInteger exponent = new BigInteger(CardKeys.privateExponent, 16);
@@ -233,14 +246,7 @@ public class Terminal extends Thread implements IObservable {
         } catch (InvalidKeySpecException | NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
-        publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
-
-        byte[] data = new byte[]{0x42};
-        byte[] signed = sign(privateKeyCard, data);
-        byte[] dataAndSigned = new byte[1+128];
-        Util.arrayCopy(data, (short) 0, dataAndSigned, (short) 0 , (short) 1);
-        Util.arrayCopy(signed, (short) 0, dataAndSigned, (short) 1, (short) 128);
-        handleSignature(publicKeyCard, 1, dataAndSigned);
+        return (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
 
     }
 
@@ -350,7 +356,7 @@ public class Terminal extends Thread implements IObservable {
         if (verify(verifyKey, plainText, signature)){
             System.out.println("Signature verified!");
         }else{
-            System.out.println("Signature verification failed!");
+            System.err.println("Signature verification failed!");
             return;
         }
     }
@@ -382,7 +388,7 @@ public class Terminal extends Thread implements IObservable {
 
 
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], ca[0], ca[1], 1)){
-            System.out.println("Nonce not incremented");
+            System.err.println("Nonce not incremented");
         }
 
         //Create TA
@@ -405,22 +411,21 @@ public class Terminal extends Thread implements IObservable {
 
         byte[] v = new BackEndCommunicator().sendAndReceive(CaTaTaSigned); //Received from the backend composed of (plaintext Public key card, plaintext public key terminal, nonce incremented, signature digest of previous)
 
-        //Nonce || exponentCard || modulusCard || exponentTerminal || modulusTerminal || signature
+        //Nonce || publicKeyEncoded || exponentTerminal || modulusTerminal || signature
         System.out.println(DatatypeConverter.printHexBinary(v));
 
         short exponentSize = 3;
         short modulusSize = 128;
+        short encodedSize = 162;
 
         //Check if nonce is properly incremented
         if (! isNonceIncrementedBy(nonce[0], nonce[1], v[0], v[1], 1)){
-            System.out.println("Nonce is not incremented!");
+            System.err.println("Nonce is not incremented!");
             return;
         }
 
         //Check if signature is valid
-        byte[] vPlaintext = new byte[2*exponentSize+2*modulusSize+2];
-        System.out.println(2*exponentSize+2*modulusSize+2);
-        System.out.println(v.length-128);
+        byte[] vPlaintext = new byte[2 + encodedSize + exponentSize + modulusSize];
         Util.arrayCopy(v, (short) 0, vPlaintext, (short) 0, (short) (v.length-128));
 
         short signatureSize = (short) (v.length - vPlaintext.length);
@@ -435,11 +440,11 @@ public class Terminal extends Thread implements IObservable {
         }
 
         //Keep a copy of the public key of the card here
-        byte[] publicKeyCardBytes = new byte[exponentSize + modulusSize];
-        Util.arrayCopy(vPlaintext, (short) 2, publicKeyCardBytes, (short) 0, (short) (exponentSize+modulusSize));
+        byte[] publicKeyCardBytes = new byte[encodedSize];
+        Util.arrayCopy(vPlaintext, (short) 2, publicKeyCardBytes, (short) 0, encodedSize);
 
         byte[] publicKeyTerminalBytes = new byte[exponentSize + modulusSize];
-        Util.arrayCopy(vPlaintext, (short) (2+exponentSize+modulusSize), publicKeyTerminalBytes, (short) 0, (short) (exponentSize+modulusSize));
+        Util.arrayCopy(vPlaintext, (short) (2+encodedSize), publicKeyTerminalBytes, (short) 0, (short) (exponentSize+modulusSize));
 
         byte[] modulusBytes = new byte[modulusSize];
         byte[] exponentBytes = new byte[exponentSize];
@@ -452,17 +457,7 @@ public class Terminal extends Thread implements IObservable {
         BigInteger exponent = new BigInteger(exponentBytes);
 
         // Create private and public key specs
-        RSAPublicKeySpec publicSpec = new RSAPublicKeySpec(modulus, exponent);
-
-        // Create a key factory
-        KeyFactory factory = null;
-//        try {
-//            factory = KeyFactory.getInstance("RSA");
-            // Create the RSA private and public keys
-//            publicKeyCard = (RSAPublicKey) factory.generatePublic(publicSpec);
-//        } catch (InvalidKeySpecException e) {
-//            e.printStackTrace();
-//        }
+        publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
 
         //Send to card
         CommandAPDU capdu;
@@ -644,7 +639,7 @@ public class Terminal extends Thread implements IObservable {
 
         //Check if received nonce has been incremented
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], dataRec[0], dataRec[1], 1)){
-            System.out.println("Nonce has not been incremeneted");
+            System.err.println("Nonce has not been incremeneted");
             return;
         }
 
@@ -661,7 +656,7 @@ public class Terminal extends Thread implements IObservable {
 
         //Check if nonce has been incremented
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], backendNonceIncremented[0], backendNonceIncremented[1], 2)){
-            System.out.println("Nonce has not been incremented");
+            System.err.println("Nonce has not been incremented");
             return;
         }
 
@@ -698,7 +693,7 @@ public class Terminal extends Thread implements IObservable {
         //Check if nonce is incremented
 
         if (!isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], incrementedNonce[0], incrementedNonce[1], 1)) {
-            System.out.println("Nonce has not been incremented");
+            System.err.println("Nonce has not been incremented");
             return;
         }
 
@@ -733,7 +728,7 @@ public class Terminal extends Thread implements IObservable {
         System.out.println("Response " + DatatypeConverter.printHexBinary(backendResponse));
 
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], backendResponse[0], backendResponse[1], 2)){
-            System.out.println("Nonce has not been incremented");
+            System.err.println("Nonce has not been incremented");
             return;
         }
 
@@ -800,20 +795,23 @@ public class Terminal extends Thread implements IObservable {
         System.arraycopy(nonceBytes,0,combinedData,0         ,nonceBytes.length);
         System.arraycopy(signedNonce,0,combinedData,nonceBytes.length,signedNonce.length);
 
+        System.out.println("T->C: Credit Hi " + DatatypeConverter.printHexBinary(combinedData));
 
         CommandAPDU hiAPDU = new CommandAPDU(CLASS, CREDIT_HI, 0, 0, combinedData, combinedData.length);
         ResponseAPDU responseAPDU = ch.transmit(hiAPDU);
         System.out.println("CREDIT_HI: " + Integer.toHexString(responseAPDU.getSW()));
         byte [] incrementedNonce = responseAPDU.getData();
 
+        System.out.println("C->T: Credit Hi " + DatatypeConverter.printHexBinary(incrementedNonce));
+
         //Verify nonce incremented
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], incrementedNonce[0], incrementedNonce[1], 1)){
-            System.out.println("Nonce has not been incremented");
+            System.err.println("Nonce has not been incremented");
             return;
         }
 
-        //Verify the signature
-        handleSignature(publicKeyCard, 6, incrementedNonce);
+        //Verify the signature on the card Id and the nonce
+        handleSignature(publicKeyCard, 4, incrementedNonce);
         System.out.println("hallo");
 
         //Forward the request to the backend
@@ -912,27 +910,17 @@ public class Terminal extends Thread implements IObservable {
 
         //Receive the commitment from the card
 
-        byte[] cardPayCommitment = responseAPDU.getBytes();
+        byte[] cardPayCommitment = responseAPDU.getData();
 
         //Verify the incrementation
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], cardPayCommitment[0], cardPayCommitment[1], 1)){
-            System.out.println("Nonce has not been incremented");
+            System.err.println("Nonce has not been incremented");
             return;
         }
 
-        //Verify the signature
-
-        /**
-         * For some strange reason the cardPayCommitment array has a length of 136 even though the APDU specifies a length of 134
-         * By taking the first 134 bytes the signature verification succeeds. But this is very strange. Also when diffing the souts of the two arrays
-         * we get that they are identical. Maybe a bug in the Javacard API?
-         */
-
-        byte[] shortend = new byte[134];
-        Util.arrayCopy(cardPayCommitment, (short) 0, shortend, (short) 0, (short) 134);
 
         //Check signature on ( Nonce || Id || Amount )
-        handleSignature(publicKeyCard, 6, shortend);
+        handleSignature(publicKeyCard, 6, cardPayCommitment);
 
         System.out.println("Continued");
 
@@ -952,7 +940,7 @@ public class Terminal extends Thread implements IObservable {
 
         //Verify nonce incremented
         if (! isNonceIncrementedBy(cardPayCommitment[0], cardPayCommitment[1], backendResponse[0], backendResponse[1], 1)){
-            System.out.println("Nonce has not been incremented");
+            System.err.println("Nonce has not been incremented");
             return;
         }
 
