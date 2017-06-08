@@ -619,7 +619,7 @@ public class Epurse extends Applet implements ISO7816 {
             boolean payloadVerified = verify(payload, (short) 0, (short) 4, transientBuffer,(short) 0, (short) 128, terminalKey );
             if (!payloadVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
-            incrementNumberAndStore(lastNonce[0], lastNonce[1], (short) 1);
+            incrementNumberAndStore(lastNonce[0], lastNonce[1], (short) 0);
             short sBalance = Util.makeShort(balance[0], balance[1]);
             short sAmount = Util.makeShort(amount[0], amount[1]);
             if((short) (sBalance-sAmount) < (short) 0) ISOException.throwIt(SW_DATA_INVALID);
@@ -630,7 +630,9 @@ public class Epurse extends Applet implements ISO7816 {
             Util.arrayCopy(amount, (short) 0, transientBuffer, (short) 4, (short) 2);
 
             // We sing wit offset 2 to prevent the overridign of the nonce
-            short signedResponseLength = sign(transientBuffer, (short) 0, (short) 6, transientBuffer,(short)6);
+            short signedResponseLength = sign(transientBuffer, (short) 0, (short) 6, transientBuffer, (short) 6);
+
+//            ISOException.throwIt(signedResponseLength);
 
             //Send the response
             apdu.setOutgoing();
@@ -642,7 +644,7 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
     private void processCommitPayment(APDU apdu){
-
+        //Todo: implement :)
     }
 
     private void processDecommissioningClear(APDU apdu) {

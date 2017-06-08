@@ -125,8 +125,8 @@ public class Terminal extends Thread implements IObservable {
                             personalizationFull();
                             publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
 
+                            //Todo: fix the hardcoded key
                             loadCardKeys();
-
 
                             testTerminalAuth();
 
@@ -134,6 +134,7 @@ public class Terminal extends Thread implements IObservable {
 
                             testCrediting();
 
+                            //Todo: finish decommissioning
                             //testDecommissioning(ch);
 
                         } catch (Exception e) {
@@ -190,11 +191,9 @@ public class Terminal extends Thread implements IObservable {
         Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
         try {
             if(type == 0){
-                RSAPublicKey pubk = (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(encodedKey));
-                return pubk;
+                return (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(encodedKey));
             }else{
-                RSAPrivateKey privk = (RSAPrivateKey) KeyFactory.getInstance("RSA").generatePrivate(new X509EncodedKeySpec(encodedKey));
-                return privk;
+                return (RSAPrivateKey) KeyFactory.getInstance("RSA").generatePrivate(new X509EncodedKeySpec(encodedKey));
             }
         } catch (NoSuchAlgorithmException | InvalidKeySpecException ex) {
             System.out.println(ex.getStackTrace());
@@ -516,9 +515,7 @@ public class Terminal extends Thread implements IObservable {
             factory = KeyFactory.getInstance("RSA");
             // Create the RSA private and public keys
             cardPrivateKey = (RSAPrivateKey) factory.generatePrivate(privateKeySpec);
-        } catch (InvalidKeySpecException e) {
-            e.printStackTrace();
-        } catch (NoSuchAlgorithmException e) {
+        } catch (InvalidKeySpecException | NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
 
@@ -611,7 +608,9 @@ public class Terminal extends Thread implements IObservable {
 
     private void testPin() {
         //Todo: generate PIN at random
+        Random random = new Random();
 
+//        byte[] pin = {(byte) random.nextInt(9), (byte) random.nextInt(9), (byte) random.nextInt(9), (byte) random.nextInt(9)};
         byte[] pin = {1, 2, 3, 4};
         try {
             CommandAPDU capdu;
@@ -768,6 +767,12 @@ public class Terminal extends Thread implements IObservable {
         System.out.println("Response: " + DatatypeConverter.printHexBinary(responseAPDU.getData()));
     }
 
+    /**
+     * Encrypt the input byte array with the given RSA public key
+     * @param input
+     * @param publickey
+     * @return
+     */
     private byte[] encrypt(byte[] input, RSAPublicKey publickey){
         Cipher cipher = null;
         try {
@@ -779,30 +784,6 @@ public class Terminal extends Thread implements IObservable {
         }
         return null;
     }
-
-    /**
-     * Test with encryption and decryption
-     */
-//    private void testEncryptionDecryption(){
-//        try {
-//            byte[] input = new byte[]{0x42};
-//
-//
-//            cipher.init(Cipher.DECRYPT_MODE, privateKeyTerminal);
-//            byte[] decipheredByte = cipher.doFinal(cipherByte);
-//
-//            System.out.println("Encryption: " + DatatypeConverter.printHexBinary(cipherByte));
-//            System.out.println("Size of encryption: " + cipherByte.length);
-//            System.out.println("Decrypted: " + DatatypeConverter.printHexBinary(decipheredByte));
-//
-//        } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException e) {
-//            e.printStackTrace();
-//        } catch (BadPaddingException e) {
-//            e.printStackTrace();
-//        } catch (IllegalBlockSizeException e) {
-//            e.printStackTrace();
-//        }
-//    }
 
     private void testCrediting() throws CardException {
 
@@ -858,6 +839,7 @@ public class Terminal extends Thread implements IObservable {
 
         //Receive the correct balance from the backend
         short receivedBalance = Util.makeShort(backendResponse[2], backendResponse[3]);
+        //Todo make credit amount non-fixed
         short creditAmount = 21;
 
         if(receivedBalance-creditAmount< 0){
@@ -912,19 +894,15 @@ public class Terminal extends Thread implements IObservable {
             hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, dataToSend, dataToSend.length);
             responseAPDU = ch.transmit(hiAPDU);
 
-            System.out.println("Arg 0 " + responseAPDU.getSW());
-
             //Second APDU has the signed (nonce, amount, balance).
             byte[] dataToSendNoPIN = new byte[4];
             Util.arrayCopy(dataToSend, (short) 0, dataToSendNoPIN, (short) 0, (short) 4);
             byte[] dataTosendNoPINSigned = sign(dataToSendNoPIN);
 
-            System.out.println(dataTosendNoPINSigned.length);
             hiAPDU = new CommandAPDU(CLASS, instruction, 1, 0, dataTosendNoPINSigned, (short) dataTosendNoPINSigned.length);
             responseAPDU = ch.transmit(hiAPDU);
-
-            System.out.println("Arg 1 " + DatatypeConverter.printHexBinary(responseAPDU.getData()));
         }else{
+            //Todo: implement this on the card
 //            hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, bytesApdu, bytesApdu.length);
 //            responseAPDU = ch.transmit(hiAPDU);
         }
@@ -944,21 +922,17 @@ public class Terminal extends Thread implements IObservable {
 
         //Verify the signature
 
-        byte[] data = new byte[6];
-        data[0] = cardPayCommitment[0];
-        data[1] = cardPayCommitment[1];
-        data[2] = 0x00;
-        data[3] = 0x01;
-        data[4] = cardPayCommitment[4];
-        data[5] = cardPayCommitment[5];
-        byte[] dataSigned = sign(privateKeyCard, data);
-        byte[] complete = new byte[6+128];
-        Util.arrayCopy(data, (short) 0, complete, (short) 0, (short) 6);
-        Util.arrayCopy(dataSigned, (short) 0, complete, (short) 6, (short) 128);
+        /**
+         * For some strange reason the cardPayCommitment array has a length of 136 even though the APDU specifies a length of 134
+         * By taking the first 134 bytes the signature verification succeeds. But this is very strange. Also when diffing the souts of the two arrays
+         * we get that they are identical. Maybe a bug in the Javacard API?
+         */
 
-        System.out.println("Signed on terminal: " + DatatypeConverter.printHexBinary(complete));
+        byte[] shortend = new byte[134];
+        Util.arrayCopy(cardPayCommitment, (short) 0, shortend, (short) 0, (short) 134);
 
-        handleSignature(publicKeyCard, 6, cardPayCommitment);
+        //Check signature on ( Nonce || Id || Amount )
+        handleSignature(publicKeyCard, 6, shortend);
 
         System.out.println("Continued");
 
@@ -1004,6 +978,16 @@ public class Terminal extends Thread implements IObservable {
             System.arraycopy(tmp, 1, data, 0, tmp.length - 1);
         }
         return data;
+    }
+
+    private void printDifferenceInArrays(byte[] a, byte[] b){
+        System.out.println("Length of a " + a.length);
+        System.out.println("Length of b " + b.length);
+        for (int i = 0  ; i < a.length ; i++){
+            if (a[i] != b[i]){
+                System.out.println("Array a at "+ i + " different with b at " + i + " value a " + a[i] + " value b " + b[i]  );
+            }
+        }
     }
 
     private void testSignatureRSA() {
