@@ -678,7 +678,7 @@ public class Epurse extends Applet implements ISO7816 {
         // If signature verification not verified throw exception
         if (!isVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
-        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)3);
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)2);
 
         // Verify id
         if (Util.arrayCompare(id, (short) 0, transientBuffer, (short) 2, (short) 2) != 0x00) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);

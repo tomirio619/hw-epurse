@@ -709,43 +709,50 @@ public class Terminal extends Thread implements IObservable {
 
         //Forward this message to the backend
 
-        //Nonce || Card Id || Amount
+        //MessageCode || Amount || Nonce || Card Id || Signature (Nonce || CardId)
+
+        //Todo, maybe sign the amount?
 
         short testAmount = 5;
-        byte[] requestForReload = new  byte[6];
-        Util.arrayCopy(incrementedNonce, (short) 0, requestForReload, (short) 0, (short) 4);
+        byte[] requestForReload = new  byte[4+incrementedNonce.length];
+
+        requestForReload[0] = 0x00;
+        requestForReload[1] = 0x04;
 
         byte[] amountByte = new byte[]{
                 (byte) (testAmount >> 8),
                 (byte) testAmount
         };
-        Util.arrayCopy(amountByte, (short) 0, requestForReload, (short) 4, (short) 2);
+
+        Util.arrayCopy(amountByte, (short) 0, requestForReload, (short) 2, (short) 2);
+        Util.arrayCopy(incrementedNonce, (short) 0, requestForReload, (short) 4, (short) incrementedNonce.length);
 
         //Receive bytes from the backend
         byte[] backendResponse = backend.sendAndReceive(requestForReload);  //Returns Nonce || newbalance || signed
+
+        System.out.println("Response " + DatatypeConverter.printHexBinary(backendResponse));
 
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], backendResponse[0], backendResponse[1], 2)){
             System.out.println("Nonce has not been incremented");
             return;
         }
 
-
         //Signature verification
         handleSignature(publicKeyBackend, 4, backendResponse);
 
         //Send to card (Nonce, Id, Amount) || signed
+        byte[] incrementNonce = incrementNonceBy(backendResponse[0], backendResponse[1], 1);
         short balance = Util.makeShort(backendResponse[4], backendResponse[5]);
         short amount = 90;
         short newBalance = (short) (balance + amount);
 
         byte [] dataToSend = new byte[]{
-                backendResponse[0],
-                backendResponse[1],
-                backendResponse[2],
-                backendResponse[3],
-                (byte) (newBalance >> 8),
-                (byte) newBalance
-
+                incrementNonce[0],  //Nonce received from backend incremented
+                incrementNonce[1],  //""
+                incrementedNonce[2],    //Card Id
+                incrementedNonce[3],    //Card ID
+                (byte) (newBalance >> 8),   //New balance
+                (byte) newBalance       //New balance
         };
 
         byte[] signedBytes = sign(dataToSend);
@@ -753,6 +760,7 @@ public class Terminal extends Thread implements IObservable {
         System.arraycopy(dataToSend,0, bytesApdu,0,6);
         System.arraycopy(signedBytes,0, bytesApdu,6,128);
 
+        System.out.println(DatatypeConverter.printHexBinary(bytesApdu));
         hiAPDU = new CommandAPDU(CLASS, RELOADING_UPDATE, 0, 0, bytesApdu, bytesApdu.length);
         responseAPDU = ch.transmit(hiAPDU);
         System.out.println("RELOADING_UPDATE: " + Integer.toHexString(responseAPDU.getSW()));

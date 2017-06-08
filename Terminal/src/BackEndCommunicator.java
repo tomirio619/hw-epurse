@@ -19,7 +19,7 @@ public class BackEndCommunicator extends Thread{
 
     private void setUp(){
 //        try {
-//
+//            socket = new Socket("127.0.0.1", 9090);
 //            outToServer = socket.getOutputStream();
 //            inFromServer = socket.getInputStream();
 //        } catch (IOException e) {
@@ -48,7 +48,6 @@ public class BackEndCommunicator extends Thread{
             byte[] buffer = null;
             while(true){
                 dIn = new DataInputStream(socket.getInputStream());
-
 
                 int length = dIn.readInt();
                 if (length > 0){
