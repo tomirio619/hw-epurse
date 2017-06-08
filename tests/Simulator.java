@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.security.*;
 import java.security.KeyPair;
 import java.security.MessageDigest;
+import java.security.PublicKey;
 import java.security.Signature;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
@@ -41,6 +42,7 @@ public class Simulator extends TestCase {
     private static final String APPLET_AID = "a0404142434445461001";
     private static final byte CLASS = (byte) 0xB0;
     private final static byte EPURSE_CLA = (byte) 0xba;
+    private final static byte PERSONALIZATION_BACKEND_KEY = (byte) 0x20;
     private final static byte PERSONALIZATION_HI = (byte) 0x30;
     private final static byte PERSONALIZATION_DATES = (byte) 0x31;
     private final static byte PERSONALIZATION_NEW_PIN = (byte) 0x32;
@@ -71,9 +73,18 @@ public class Simulator extends TestCase {
     private static CardChannel cardChannel = null;
     private static JavaxSmartCardInterface simulator = null;
     SecureRandom secureRandom;
+    private byte[] terminalId = new byte[]{0x00, 0x01};
+
 
     private RSAPublicKey publicKeyBackend;
     private RSAPrivateKey privateKeyBackend;
+
+    private RSAPublicKey publicKeyTerminal;
+    private RSAPrivateKey privateKeyTerminal;
+
+    private RSAPublicKey publicKeyCard;
+    private BackEndCommunicator backend;
+
 
 
 
@@ -107,8 +118,6 @@ public class Simulator extends TestCase {
         } catch (InvalidKeySpecException e) {
             e.printStackTrace();
         }
-
-
         /*Signature signature = Signature.getInstance("SHA1withRSA", "BC");
         signature.initSign(privateKeyBackend);
         signature.update((byte)20);
@@ -121,11 +130,23 @@ public class Simulator extends TestCase {
         boolean verified = signature.verify(bytesSignature, 0, lengthSignature);
         System.out.println(verified);
 */
-
-
-
-
 }
+
+    private void loadTerminalKeys() {
+        //First generate test terminal keypair
+        KeyPairGenerator g = null;
+        try {
+            g = KeyPairGenerator.getInstance("RSA", "BC");
+            g.initialize(1024, new SecureRandom());
+            java.security.KeyPair pairT = g.generateKeyPair();
+            publicKeyTerminal = (RSAPublicKey) pairT.getPublic();
+//            System.out.println(publicKeyCard.getEncoded());
+            //System.out.println("Terminal public: " + DatatypeConverter.printHexBinary(publicKeyTerminal.getEncoded()));
+            privateKeyTerminal = (RSAPrivateKey) pairT.getPrivate();
+        } catch (NoSuchAlgorithmException | NoSuchProviderException e) {
+            e.printStackTrace();
+        }
+    }
 
     @BeforeClass
     protected void setUp() throws Exception {
@@ -172,6 +193,9 @@ public class Simulator extends TestCase {
         setUpIsDone = true;
 
         loadBackendKeys();
+        loadTerminalKeys();
+
+        backend = new BackEndCommunicator();
     }
 
     // Send all step personalization
@@ -192,7 +216,7 @@ public class Simulator extends TestCase {
         Util.arrayCopy(exponentBytesBE,(short)0,bytesKeyBE,(short)0,(short)exponentBytesBE.length);
         Util.arrayCopy(modulusBytesBE,(short)0,bytesKeyBE,(short)exponentBytesBE.length,(short)modulusBytesBE.length);
         CommandAPDU capdu;
-        capdu = new CommandAPDU(CLASS, BACKEND_KEY, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyBE);
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_BACKEND_KEY, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyBE);
         ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
         System.out.println("BACKEND_KEY: " + Integer.toHexString(responsePrivate.getSW()));
 
@@ -255,51 +279,117 @@ public class Simulator extends TestCase {
     public void testTerminalAuth() throws NoSuchProviderException, NoSuchAlgorithmException, InvalidKeyException, javax.smartcardio.CardException, CardException, SignatureException {
 
         personalizationFull();
-        //First generate test terminal keypair
-        KeyPairGenerator g = KeyPairGenerator.getInstance("RSA", "BC");
-        g.initialize(1024, new SecureRandom());
-        java.security.KeyPair pairT = g.generateKeyPair();
-        RSAPublicKey publicKey = (RSAPublicKey) pairT.getPublic();
-        byte[] exponentBytes = getBytes(publicKey.getPublicExponent());
-        byte[] modulusBytes = getBytes(publicKey.getModulus());
 
 
-        //Sign the public key of the terminal
-        byte[] bytesKeyTerm = new byte [modulusBytes.length+exponentBytes.length];
-        Util.arrayCopy(exponentBytes,(short)0,bytesKeyTerm,(short)0,(short)exponentBytes.length);
-        Util.arrayCopy(modulusBytes,(short)0,bytesKeyTerm,(short)exponentBytes.length,(short)modulusBytes.length);
+        System.out.println("-----Test Verification Terminal-----");
 
-        // This is the signature of the BackEnd
-        byte[] signedKeyTerm = null;
-        int lenghtSig=0;
-        Signature signature = null;
+        byte [] nonceBytes = new byte[2];
+        secureRandom.nextBytes(nonceBytes);
+        CommandAPDU hiAPDU = new CommandAPDU(CLASS, VERIFICATION_HI, 0, 0, nonceBytes, 2);
+        ResponseAPDU responseAPDU = cardChannel.transmit(hiAPDU);
+        System.out.println("VERIFICATION_HI: " + Integer.toHexString(responseAPDU.getSW()));
+
+        byte [] ca = responseAPDU.getData(); // Data Ca{Ca}SKC
+
+        if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], ca[0], ca[1], 1)){
+            System.out.println("Nonce not incremented");
+        }
+
+        //Create TA
+        byte[] TA = new byte[4]; //TA is our Id, incremented nonce
+        byte[] nonce = incrementNonceBy(ca[0], ca[1], 1);
+        Util.arrayCopy(nonce, (short) 0, TA, (short) 0, (short) 2);
+        Util.arrayCopy(terminalId, (short) 0, TA, (short) 2, (short) 2);
+        byte[] TASigned = sign(TA);
+
+        byte[] CaTaTaSigned = new byte[ca.length+4+TASigned.length+2]; //We send 4 bytes of Ta, 4 bytes of CA and then the signed part of TA prepended by the message code (2 bytes)
+        Util.arrayCopy(new byte[]{0x00, 0x01}, (short) 0, CaTaTaSigned, (short) 0, (short) 2); //Add the message code
+        Util.arrayCopy(ca, (short) 0, CaTaTaSigned, (short) 2, (short) ca.length); //CA Part
+        Util.arrayCopy(TA, (short) 0, CaTaTaSigned, (short) (2+ca.length), (short) 4); //Plaintext of TA
+        Util.arrayCopy(TASigned, (short) 0, CaTaTaSigned, (short) (2+ca.length+4), (short) TASigned.length);  //Copy everything else
+
+        //Send everything to the backend
+
+        byte[] v = backend.sendAndReceive(CaTaTaSigned); //Received from the backend composed of (plaintext Public key card, plaintext public key terminal, nonce incremented, signature digest of previous)
+
+
+        //Nonce || exponentCard || modulusCard || exponentTerminal || modulusTerminal || signature
+        System.out.println(DatatypeConverter.printHexBinary(v));
+
+        short exponentSize = 3;
+        short modulusSize = 129;
+
+        //Check if nonce is properly incremented
+        if (! isNonceIncrementedBy(nonce[0], nonce[1], v[0], v[1], 1)){
+            System.out.println("Nonce is not incremented!");
+            return;
+        }
+
+        //Check if signature is valid
+        byte[] vPlaintext = new byte[2*exponentSize+2*modulusSize+2];
+        Util.arrayCopy(v, (short) 0, vPlaintext, (short) 0, (short) (v.length-128));
+
+        short signatureSize = (short) (v.length - vPlaintext.length);
+        byte[] vSignature = new byte[signatureSize]; //Buffer for signature
+        Util.arrayCopy(v, (short) (vPlaintext.length), vSignature, (short) 0, signatureSize);
+
+        System.out.println(DatatypeConverter.printHexBinary(vPlaintext));
+
+        if (!verify(publicKeyBackend, vPlaintext, vSignature)) {
+            System.out.println("Signature is not valid");
+            return;
+        }
+
+        //Keep a copy of the public key of the card here
+        byte[] publicKeyCardBytes = new byte[exponentSize + modulusSize];
+        Util.arrayCopy(vPlaintext, (short) 2, publicKeyCardBytes, (short) 0, (short) (exponentSize+modulusSize));
+
+        byte[] publicKeyTerminalBytes = new byte[exponentSize + modulusSize];
+        Util.arrayCopy(vPlaintext, (short) (2+exponentSize+modulusSize), publicKeyTerminalBytes, (short) 0, (short) (exponentSize+modulusSize));
+
+        byte[] modulusBytes = new byte[modulusSize];
+        byte[] exponentBytes = new byte[exponentSize];
+
+        //Todo: look at whether this is correct. Only works if the RSA public key that has been received was send using the getEncoded() function
+        Util.arrayCopy(publicKeyCardBytes, (short) 0, modulusBytes, (short) 0, modulusSize);
+        Util.arrayCopy(publicKeyCardBytes, modulusSize, exponentBytes, (short) 0, exponentSize);
+
+        BigInteger modulus = new BigInteger(modulusBytes);
+        BigInteger exponent = new BigInteger(exponentBytes);
+
+        // Create private and public key specs
+        RSAPublicKeySpec publicSpec = new RSAPublicKeySpec(modulus, exponent);
+
+        // Create a key factory
+        KeyFactory factory = null;
         try {
-            signature = Signature.getInstance("SHA1withRSA", "BC");
-            signature.initSign(privateKeyBackend);
-            signature.update(bytesKeyTerm);
-            signedKeyTerm = signature.sign();
-            lenghtSig = signedKeyTerm.length;
-
-        }catch (Exception e){
+            factory = KeyFactory.getInstance("RSA");
+            // Create the RSA private and public keys
+            publicKeyCard = (RSAPublicKey) factory.generatePublic(publicSpec);
+        } catch (InvalidKeySpecException e) {
             e.printStackTrace();
         }
 
-        signature.initVerify(publicKeyBackend);
-        signature.update(bytesKeyTerm);
-        //Lets check it
-        boolean verified = signature.verify(signedKeyTerm, 0, lenghtSig);
+        //Send to card
+        CommandAPDU capdu;
+        ResponseAPDU responsePrivate;
 
+        byte[] dataToSend = new byte[2 + publicKeyTerminalBytes.length];
+        dataToSend[0] = v[0];
+        dataToSend[1] = v[1];
+        Util.arrayCopy(publicKeyTerminalBytes, (short) 0, dataToSend, (short) 2, (short) publicKeyTerminalBytes.length);
 
-        // Send public key of the terminal
-        CommandAPDU capdu = new CommandAPDU(CLASS, VERIFICATION_V, (byte) exponentBytes.length, (byte) modulusBytes.length, bytesKeyTerm);
-        ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
+        System.out.println(Util.makeShort(dataToSend[0], dataToSend[1]));
+
+        // Send public key of the terminal extrated from the plaintext
+        capdu = new CommandAPDU(CLASS, VERIFICATION_V, (byte) exponentBytes.length, (byte) modulusBytes.length, dataToSend);
+        responsePrivate = cardChannel.transmit(capdu);
         System.out.println("VERIFICATION_V: " + Integer.toHexString(responsePrivate.getSW()));
 
-        // Send public key of the terminal signed
-        capdu = new CommandAPDU(CLASS, VERIFICATION_S, (byte) 0, (byte) 0, signedKeyTerm);
-        responsePrivate = simulator.transmitCommand(capdu);
+        // Send the signature
+        capdu = new CommandAPDU(CLASS, VERIFICATION_S, (byte) 0, (byte) 0, vSignature);
+        responsePrivate = cardChannel.transmit(capdu);
         System.out.println("VERIFICATION_S: " + Integer.toHexString(responsePrivate.getSW()));
-
     }
 
 
@@ -354,6 +444,7 @@ public class Simulator extends TestCase {
         generator.initialize(1024);
         java.security.KeyPair keypair = generator.generateKeyPair();
         RSAPublicKey cardPublickey = (RSAPublicKey) keypair.getPublic();
+        publicKeyCard = cardPublickey;
         RSAPrivateKey cardPrivateKey = (RSAPrivateKey) keypair.getPrivate();
 
         //byte [] nonceBytes = new byte[2];
@@ -461,11 +552,11 @@ public class Simulator extends TestCase {
             CommandAPDU capdu;
             capdu = new CommandAPDU(CLASS, PERSONALIZATION_NEW_PIN, (byte) 0, (byte) 0, pin);
             ResponseAPDU responsePrivate = simulator.transmitCommand(capdu);
-            System.out.println("Set pin: " + responsePrivate.getSW());
+            System.out.println("Set pin: " + Integer.toHexString(responsePrivate.getSW()));
 
-            capdu = new CommandAPDU(CLASS, CREDIT_COMMIT_PIN, (byte) 0, (byte) 0, pin);
-            responsePrivate = simulator.transmitCommand(capdu);
-            System.out.println("Check pin: " + responsePrivate.getSW());
+            //capdu = new CommandAPDU(CLASS, CREDIT_COMMIT_PIN, (byte) 0, (byte) 0, pin);
+            //responsePrivate = simulator.transmitCommand(capdu);
+            //System.out.println("Check pin: " + Integer.toHexString(responsePrivate.getSW()));
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -480,6 +571,60 @@ public class Simulator extends TestCase {
             System.arraycopy(tmp, 1, data, 0, tmp.length - 1);
         }
         return data;
+    }
+
+    private byte[] incrementNonceBy(byte n1, byte n2, int incrementBy){
+        short old = Util.makeShort(n1, n2);
+        old += incrementBy;
+
+        byte[] nonce = {
+                (byte) ((old >> 8) & 0xff),
+                (byte) (old & 0xff),
+        };
+        return nonce;
+    }
+
+    /**
+     * Checks whether a nonce (oldNonce1 || oldNonce2) + incrementedBy == nonce (newNonce1 || newNonce2)
+     * @param oldNonce1
+     * @param oldNonce2
+     * @param newNonce1
+     * @param newNonce2
+     * @param incrementedBy
+     * @return
+     */
+    private boolean isNonceIncrementedBy(byte oldNonce1, byte oldNonce2, byte newNonce1, byte newNonce2, int incrementedBy){
+        short old = Util.makeShort(oldNonce1, oldNonce2);
+        short newNonce = Util.makeShort(newNonce1, newNonce2);
+
+        return old + incrementedBy == newNonce;
+    }
+
+    private byte[] sign(byte[] textToSign){
+        Signature signature = null;
+        try {
+            signature = Signature.getInstance("SHA1withRSA", "BC");
+            signature.initSign(privateKeyTerminal);
+            signature.update(textToSign,0,textToSign.length);
+            return signature.sign();
+        } catch (NoSuchAlgorithmException | NoSuchProviderException | SignatureException | InvalidKeyException e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
+    private boolean verify(PublicKey publicKey, byte[] plainText, byte[] signedBytes){
+        Signature signature = null;
+        try {
+            signature = Signature.getInstance("SHA1withRSA", "BC");
+            signature.initVerify(publicKey);
+            signature.update(plainText);
+            return signature.verify(signedBytes, 0, signedBytes.length);
+        } catch (NoSuchAlgorithmException | NoSuchProviderException | SignatureException | InvalidKeyException e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 
 

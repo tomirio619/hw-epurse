@@ -2,6 +2,7 @@ import Events.IObservable;
 import com.sun.xml.internal.bind.v2.runtime.unmarshaller.ValuePropertyLoader;
 import javacard.framework.ISO7816;
 import javacard.framework.Util;
+import org.bouncycastle.jcajce.provider.asymmetric.rsa.BCRSAPublicKey;
 import org.bouncycastle.util.encoders.Hex;
 
 import javax.crypto.BadPaddingException;
@@ -12,6 +13,7 @@ import javax.smartcardio.*;
 import javax.xml.bind.DatatypeConverter;
 import java.math.BigInteger;
 import java.security.*;
+import java.security.interfaces.RSAKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.InvalidKeySpecException;
@@ -37,7 +39,7 @@ public class Terminal extends Thread implements IObservable {
     private final static byte PERSONALIZATION_DATES = (byte) 0x31;
     private final static byte VERIFICATION_V = (byte) 0x42;
     private final static byte VERIFICATION_S = (byte) 0x47;
-    private final static byte BACKEND_KEY = (byte) 0x46;
+    private final static byte PERSONALIZATION_BACKEND_KEY = (byte) 0x20;
     private final static byte DECOMMISSIONING_HI = (byte) 0x33;
     private final static byte DECOMMISSIONING_CLEAR = (byte) 0x34;
 
@@ -123,9 +125,10 @@ public class Terminal extends Thread implements IObservable {
 
                             testTerminalAuth();
 
-                            testReloading();
+                            //testReloading();
 
-                            testCrediting();
+                            //testCrediting();
+
                             //testDecommissioning(ch);
 
                         } catch (Exception e) {
@@ -177,21 +180,78 @@ public class Terminal extends Thread implements IObservable {
         }
     }
 
+    // Type 0 public 1 private
+    private RSAKey keyFromEncoded(byte[] encodedKey, int type){
+        Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+        try {
+            if(type == 0){
+                RSAPublicKey pubk = (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(encodedKey));
+                return pubk;
+            }else{
+                RSAPrivateKey privk = (RSAPrivateKey) KeyFactory.getInstance("RSA").generatePrivate(new X509EncodedKeySpec(encodedKey));
+                return privk;
+            }
+        } catch (NoSuchAlgorithmException | InvalidKeySpecException ex) {
+            System.out.println(ex.getStackTrace());
+            //Logger.getLogger(MessageHandler.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        return null;
+    }
+
+
+
+    public byte[] hexStringToByteArray(String s) {
+        int len = s.length();
+        byte[] data = new byte[len / 2];
+        for (int i = 0; i < len; i += 2) {
+            data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)+Character.digit(s.charAt(i + 1), 16));
+        }
+        return data;
+    }
+
     private void loadTerminalKeys() {
         //First generate test terminal keypair
-        KeyPairGenerator g = null;
+        BigInteger modulus = new BigInteger(TerminalKeys.modulus, 16);
+        BigInteger exponent = new BigInteger(TerminalKeys.privateExponent, 16);
+
+        // Create private  key specs
+        RSAPrivateKeySpec privateKeySpec = new RSAPrivateKeySpec(modulus, exponent);
+
+        // Create a key factory
+        KeyFactory factory = null;
+        try {
+            factory = KeyFactory.getInstance("RSA");
+            // Create the RSA private and public keys
+            privateKeyTerminal = (RSAPrivateKey) factory.generatePublic(privateKeySpec);
+        } catch (InvalidKeySpecException e) {
+            e.printStackTrace();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+        publicKeyTerminal = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(TerminalKeys.publicEncoded), 0);
+
+       /* KeyPairGenerator g = null;
         try {
             g = KeyPairGenerator.getInstance("RSA", "BC");
             g.initialize(1024, new SecureRandom());
             java.security.KeyPair pairT = g.generateKeyPair();
             publicKeyTerminal = (RSAPublicKey) pairT.getPublic();
-//            System.out.println(publicKeyCard.getEncoded());
+//          System.out.println(publicKeyCard.getEncoded());
             System.out.println("Terminal public: " + DatatypeConverter.printHexBinary(publicKeyTerminal.getEncoded()));
             privateKeyTerminal = (RSAPrivateKey) pairT.getPrivate();
         } catch (NoSuchAlgorithmException | NoSuchProviderException e) {
             e.printStackTrace();
-        }
+        }*/
     }
+
+    // For personalizatio purpouse
+    private void loadCardKeys() {
+
+        publicKeyTerminal = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(TerminalKeys.publicEncoded), 0);
+
+    }
+
+
 
     // Send all step personalization
     private void personalizationFull() throws CardException, NoSuchAlgorithmException {
@@ -311,6 +371,9 @@ public class Terminal extends Thread implements IObservable {
 
         //Send everything to the backend
 
+
+        System.out.println("Verification hi BE" + DatatypeConverter.printHexBinary(CaTaTaSigned));
+
         byte[] v = backend.sendAndReceive(CaTaTaSigned); //Received from the backend composed of (plaintext Public key card, plaintext public key terminal, nonce incremented, signature digest of previous)
 
 
@@ -347,7 +410,6 @@ public class Terminal extends Thread implements IObservable {
 
         byte[] publicKeyTerminalBytes = new byte[exponentSize + modulusSize];
         Util.arrayCopy(vPlaintext, (short) (2+exponentSize+modulusSize), publicKeyTerminalBytes, (short) 0, (short) (exponentSize+modulusSize));
-
 
         byte[] modulusBytes = new byte[modulusSize];
         byte[] exponentBytes = new byte[exponentSize];
@@ -402,18 +464,34 @@ public class Terminal extends Thread implements IObservable {
         Util.arrayCopy(exponentBytesBE,(short)0,bytesKeyBE,(short)0,(short)exponentBytesBE.length);
         Util.arrayCopy(modulusBytesBE,(short)0,bytesKeyBE,(short)exponentBytesBE.length,(short)modulusBytesBE.length);
         CommandAPDU capdu;
-        capdu = new CommandAPDU(CLASS, BACKEND_KEY, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyBE);
+        //Changed to PERSONALIZATION_BACKEND_KEY 0x20
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_BACKEND_KEY, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyBE);
         ResponseAPDU responsePrivate = ch.transmit(capdu);
         System.out.println("BACKEND_KEY: " + Integer.toHexString(responsePrivate.getSW()));
 
     }
 
     public void testPersonalizationHi() throws CardException, NoSuchAlgorithmException {
-        KeyPairGenerator generator  = KeyPairGenerator.getInstance("RSA");
-        generator.initialize(1024);
-        java.security.KeyPair keypair = generator.generateKeyPair();
-        RSAPublicKey cardPublickey = (RSAPublicKey) keypair.getPublic();
-        RSAPrivateKey cardPrivateKey = (RSAPrivateKey) keypair.getPrivate();
+
+        //Get keys from CardKeys.java (keys stored in the database)
+        RSAPrivateKey cardPrivateKey = null;
+        BigInteger modulusBig = new BigInteger(CardKeys.modulus, 16);
+        BigInteger exponentBig = new BigInteger(CardKeys.privateExponent, 16);
+        // Create private  key specs
+        RSAPrivateKeySpec privateKeySpec = new RSAPrivateKeySpec(modulusBig, exponentBig);
+        // Create a key factory
+        KeyFactory factory = null;
+        try {
+            factory = KeyFactory.getInstance("RSA");
+            // Create the RSA private and public keys
+            cardPrivateKey = (RSAPrivateKey) factory.generatePrivate(privateKeySpec);
+        } catch (InvalidKeySpecException e) {
+            e.printStackTrace();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+
+        RSAPublicKey cardPublickey = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
 
         //byte [] nonceBytes = new byte[2];
         //secureRandom.nextBytes(nonceBytes);
@@ -885,6 +963,13 @@ public class Terminal extends Thread implements IObservable {
 
 
     }
+
+    public static void main(String[] args) {
+        Terminal terminal = new Terminal();
+        //new Thread(Terminal).run();
+    }
+
+
 
 
 }
