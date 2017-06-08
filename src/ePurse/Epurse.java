@@ -4,6 +4,8 @@ import javacard.framework.*;
 import javacard.security.*;
 import javacardx.crypto.Cipher;
 
+import javax.print.attribute.standard.MediaSize;
+
 /**
  * @noinspection ClassNamePrefixedWithPackageName, ImplicitCallToSuper, MethodOverridesStaticMethodOfSuperclass, ResultOfObjectAllocationIgnored
  */
@@ -347,7 +349,6 @@ public class Epurse extends Applet implements ISO7816 {
                         sendHiMessage(apdu);
                         break;
                     case CREDIT_COMMIT_PIN:
-                        checkPIN(apdu);
                         processCommitPaymentPIN(apdu);
                         break;
                     case CREDIT_COMMIT_NO_PIN:
@@ -580,24 +581,22 @@ public class Epurse extends Applet implements ISO7816 {
 
         if (!pin.check(transientBuffer, (short) 6, PIN_LENGTH))
             ISOException.throwIt(SW_VERIFICATION_FAILED);
-
-
     }
 
     private void processCommitPaymentPIN(APDU apdu){
-
         readBuffer(apdu, transientBuffer, (short)0,(short) (headerBuffer[OFFSET_LC] & 0x00FF) );
         if(headerBuffer[ISO7816.OFFSET_P1]==0) {
             // Verify nonce, increment and save it to send in the second apdu
-            incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short) 2);
+            lastNonce[0] = transientBuffer[0];
+            lastNonce[1] = transientBuffer[1];
 
             // amount is what you should pay and balance is what you have aftewards
             //Received [nonce + amount + balance encripted(signed(pin))] 6+128
 
             //Initialize cipher
-            byte[] pinBytes = new byte[128];
+            byte[] pinBytes = new byte[4];
             cipher.init(privKey, Cipher.MODE_DECRYPT);
-            cipher.doFinal(transientBuffer, (short) 6, (short) 128, pinBytes, (short) 0);
+            cipher.doFinal(transientBuffer, (short) 4, (short) 128, pinBytes, (short) 0);
 
             // Verify pin
             // If signature verification not verified throw exception
@@ -605,22 +604,22 @@ public class Epurse extends Applet implements ISO7816 {
 
             //Get new balance and amount
             Util.arrayCopy(transientBuffer, (short) 2, amount, (short) 0, (short) 2);
-            //Util.arrayCopy(transientBuffer, (short) 4, balance, (short) 0, (short) 2);
 
         }else if (headerBuffer[ISO7816.OFFSET_P1]==1){
 
             // TODO responde with id amount sigen
             // in the second apdu we receive the nonec amount balance signed
-            byte[] payload = new byte[6];
+            byte[] payload = new byte[4];
 
             Util.arrayCopy(lastNonce, (short) 0, payload, (short) 0, (short) 2);
             Util.arrayCopy(amount, (short) 0, payload, (short) 2, (short) 2);
             //Util.arrayCopy(balance, (short) 0, payload, (short) 4, (short) 2);
             //datalength = (short) (datalength + 2);
 
-            boolean payloadVerified = verify(payload, (short) 0, (short) 6, transientBuffer,(short)0, (short) 128, terminalKey );
+            boolean payloadVerified = verify(payload, (short) 0, (short) 4, transientBuffer,(short) 0, (short) 128, terminalKey );
             if (!payloadVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
+            incrementNumberAndStore(lastNonce[0], lastNonce[1], (short) 1);
             short sBalance = Util.makeShort(balance[0], balance[1]);
             short sAmount = Util.makeShort(amount[0], amount[1]);
             if((short) (sBalance-sAmount) < (short) 0) ISOException.throwIt(SW_DATA_INVALID);
@@ -631,12 +630,12 @@ public class Epurse extends Applet implements ISO7816 {
             Util.arrayCopy(amount, (short) 0, transientBuffer, (short) 4, (short) 2);
 
             // We sing wit offset 2 to prevent the overridign of the nonce
-            short signedResponseLength = sign(transientBuffer, (short) 0, (short) 6, transientBuffer,(short)2);
+            short signedResponseLength = sign(transientBuffer, (short) 0, (short) 6, transientBuffer,(short)6);
 
             //Send the response
             apdu.setOutgoing();
-            apdu.setOutgoingLength((short) (2 + signedResponseLength));
-            apdu.sendBytesLong(transientBuffer, (short) 0, (short) (2 + signedResponseLength));
+            apdu.setOutgoingLength((short) (6 + signedResponseLength));
+            apdu.sendBytesLong(transientBuffer, (short) 0, (short) (6 + signedResponseLength));
 
         }else ISOException.throwIt(SW_COMMAND_NOT_ALLOWED);
 
@@ -685,7 +684,7 @@ public class Epurse extends Applet implements ISO7816 {
 
 
         // Store new amount
-        Util.arrayCopy(transientBuffer, (short) (NONCE_LENGTH+ID_LENGTH), amount, (short)0, AMOUNT_LENGTH);
+        Util.arrayCopy(transientBuffer, (short) (NONCE_LENGTH+ID_LENGTH), balance, (short)0, AMOUNT_LENGTH);
     }
 
 

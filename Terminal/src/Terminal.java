@@ -57,6 +57,7 @@ public class Terminal extends Thread implements IObservable {
 
     private RSAPublicKey publicKeyTerminal;
     private RSAPrivateKey privateKeyTerminal;
+    private RSAPrivateKey privateKeyCard;
 
     private SecureRandom secureRandom;
     private byte[] terminalId = new byte[]{0x00, 0x01};
@@ -131,7 +132,7 @@ public class Terminal extends Thread implements IObservable {
 
                             testReloading();
 
-                            //testCrediting();
+                            testCrediting();
 
                             //testDecommissioning(ch);
 
@@ -229,14 +230,14 @@ public class Terminal extends Thread implements IObservable {
         try {
             factory = KeyFactory.getInstance("RSA");
             // Create the RSA private and public keys
-            privateK = (RSAPrivateKey) factory.generatePrivate(privateKeySpec);
+            privateKeyCard = (RSAPrivateKey) factory.generatePrivate(privateKeySpec);
         } catch (InvalidKeySpecException | NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
         publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
 
         byte[] data = new byte[]{0x42};
-        byte[] signed = sign(privateK, data);
+        byte[] signed = sign(privateKeyCard, data);
         byte[] dataAndSigned = new byte[1+128];
         Util.arrayCopy(data, (short) 0, dataAndSigned, (short) 0 , (short) 1);
         Util.arrayCopy(signed, (short) 0, dataAndSigned, (short) 1, (short) 128);
@@ -713,7 +714,7 @@ public class Terminal extends Thread implements IObservable {
 
         //Todo, maybe sign the amount?
 
-        short testAmount = 5;
+        short testAmount = 500;
         byte[] requestForReload = new  byte[4+incrementedNonce.length];
 
         requestForReload[0] = 0x00;
@@ -742,7 +743,7 @@ public class Terminal extends Thread implements IObservable {
 
         //Send to card (Nonce, Id, Amount) || signed
         byte[] incrementNonce = incrementNonceBy(backendResponse[0], backendResponse[1], 1);
-        short balance = Util.makeShort(backendResponse[4], backendResponse[5]);
+        short balance = Util.makeShort(backendResponse[2], backendResponse[3]);
         short amount = 90;
         short newBalance = (short) (balance + amount);
 
@@ -831,21 +832,38 @@ public class Terminal extends Thread implements IObservable {
         }
 
         //Verify the signature
-        handleSignature(publicKeyCard, 4, incrementedNonce);
+        handleSignature(publicKeyCard, 6, incrementedNonce);
+        System.out.println("hallo");
 
         //Forward the request to the backend
 
+        // Request the correct balance (ie. reloading with amount 0)
+
+        short testAmount = 0;
+        byte[] requestForReload = new  byte[4+incrementedNonce.length];
+
+        requestForReload[0] = 0x00;
+        requestForReload[1] = 0x04;
+
+        byte[] amountByte = new byte[]{
+                (byte) (testAmount >> 8),
+                (byte) testAmount
+        };
+
+        Util.arrayCopy(amountByte, (short) 0, requestForReload, (short) 2, (short) 2);
+        Util.arrayCopy(incrementedNonce, (short) 0, requestForReload, (short) 4, (short) incrementedNonce.length);
+
+        //Receive bytes from the backend
+        byte[] backendResponse = backend.sendAndReceive(requestForReload);  //Returns Nonce || newbalance || signed
+
         //Receive the correct balance from the backend
-        byte[] backendResponse = new byte[6+128];
+        short receivedBalance = Util.makeShort(backendResponse[2], backendResponse[3]);
+        short creditAmount = 21;
 
-        short receivedBalance = Util.makeShort(backendResponse[4], backendResponse[5]); //Todo: check whether this is the correct offset
-        short testAmount = 21;
-
-        if(receivedBalance-testAmount < 0){
+        if(receivedBalance-creditAmount< 0){
             System.out.println("Error negative balance");
             return;
         }
-
 
         nonceBytes = incrementNonceBy(backendResponse[0], backendResponse[1], 1);
 
@@ -854,9 +872,10 @@ public class Terminal extends Thread implements IObservable {
         byte[] dataToSend = null;
         byte instruction;
 
-        if(testAmount>20){
+        if(creditAmount>20){
             Scanner scanner = new Scanner(System.in);
             byte[] pinArray = new byte[4];
+            System.out.println("Enter your PIN:");
             String pin = scanner.next();
 
             for (int i = 0 ; i < pin.length(); i++){
@@ -869,9 +888,9 @@ public class Terminal extends Thread implements IObservable {
             dataToSend = new byte[pinEncrypted.length + 4];
             dataToSend[0] = nonceBytes[0];
             dataToSend[1] = nonceBytes[1];
-            dataToSend[2] = (byte) (testAmount >> 8);
-            dataToSend[3] = (byte) (testAmount);
-            Util.arrayCopy(pinEncrypted, (short) 0, dataToSend, (short) 6, (short) pinEncrypted.length);
+            dataToSend[2] = (byte) (creditAmount >> 8);
+            dataToSend[3] = (byte) (creditAmount);
+            Util.arrayCopy(pinEncrypted, (short) 0, dataToSend, (short) 4, (short) pinEncrypted.length);
 
             instruction = CREDIT_COMMIT_PIN;
         }else{
@@ -880,36 +899,34 @@ public class Terminal extends Thread implements IObservable {
             dataToSend = new byte[]{
                 nonceBytes[0],
                 nonceBytes[1],
-                (byte) (testAmount >> 8),
-                (byte) testAmount
+                (byte) (creditAmount >> 8),
+                (byte) creditAmount
             };
         }
 
 
         System.out.println(DatatypeConverter.printHexBinary(dataToSend));
 
-        //Sign the request
-        byte[] signedBytes = sign(dataToSend);
-
-        byte [] bytesApdu = new byte[128+dataToSend.length];
-        System.arraycopy(dataToSend,0, bytesApdu,0,dataToSend.length);
-        System.arraycopy(signedBytes,0, bytesApdu,dataToSend.length,128);
-
-        if (testAmount > 20){
-            //Send in two APDUs, first one has the plaintext of the nonce, amount, balance and encrypted(signed(pin))
+        if (creditAmount > 20){
+            //Send in two APDUs, first one has the plaintext of the nonce, amount and encrypted(pin)
             hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, dataToSend, dataToSend.length);
             responseAPDU = ch.transmit(hiAPDU);
+
+            System.out.println("Arg 0 " + responseAPDU.getSW());
 
             //Second APDU has the signed (nonce, amount, balance).
             byte[] dataToSendNoPIN = new byte[4];
             Util.arrayCopy(dataToSend, (short) 0, dataToSendNoPIN, (short) 0, (short) 4);
             byte[] dataTosendNoPINSigned = sign(dataToSendNoPIN);
 
+            System.out.println(dataTosendNoPINSigned.length);
             hiAPDU = new CommandAPDU(CLASS, instruction, 1, 0, dataTosendNoPINSigned, (short) dataTosendNoPINSigned.length);
             responseAPDU = ch.transmit(hiAPDU);
+
+            System.out.println("Arg 1 " + DatatypeConverter.printHexBinary(responseAPDU.getData()));
         }else{
-            hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, bytesApdu, bytesApdu.length);
-            responseAPDU = ch.transmit(hiAPDU);
+//            hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, bytesApdu, bytesApdu.length);
+//            responseAPDU = ch.transmit(hiAPDU);
         }
 
         System.out.println("CREDITING_UPDATE: " + Integer.toHexString(responseAPDU.getSW()));
@@ -926,12 +943,38 @@ public class Terminal extends Thread implements IObservable {
         }
 
         //Verify the signature
-        handleSignature(publicKeyCard, 4, cardPayCommitment);
+
+        byte[] data = new byte[6];
+        data[0] = cardPayCommitment[0];
+        data[1] = cardPayCommitment[1];
+        data[2] = 0x00;
+        data[3] = 0x01;
+        data[4] = cardPayCommitment[4];
+        data[5] = cardPayCommitment[5];
+        byte[] dataSigned = sign(privateKeyCard, data);
+        byte[] complete = new byte[6+128];
+        Util.arrayCopy(data, (short) 0, complete, (short) 0, (short) 6);
+        Util.arrayCopy(dataSigned, (short) 0, complete, (short) 6, (short) 128);
+
+        System.out.println("Signed on terminal: " + DatatypeConverter.printHexBinary(complete));
+
+        handleSignature(publicKeyCard, 6, cardPayCommitment);
+
+        System.out.println("Continued");
 
         //Forward the request to the backend
 
+        // Messagecode (0x00, 0x05) || Nonce || CardId || Amount || Signature (nonce || cardId || amount)
+
         //Receive the final message
-        backendResponse = new byte[4];
+        byte[] dataForBackend = new byte[2+cardPayCommitment.length];
+        dataForBackend[0] = 0x00;
+        dataForBackend[1] = 0x05;
+        Util.arrayCopy(cardPayCommitment, (short) 0, dataForBackend, (short) 2, (short) cardPayCommitment.length);
+
+        backendResponse = backend.sendAndReceive(dataForBackend); //Only the nonce signed, implicit indication that the protcol has finished
+
+        System.out.println(DatatypeConverter.printHexBinary(backendResponse));
 
         //Verify nonce incremented
         if (! isNonceIncrementedBy(cardPayCommitment[0], cardPayCommitment[1], backendResponse[0], backendResponse[1], 1)){
@@ -940,7 +983,7 @@ public class Terminal extends Thread implements IObservable {
         }
 
         //Verify the signature
-        handleSignature(publicKeyBackend, 4, backendResponse);
+        handleSignature(publicKeyBackend, 2, backendResponse);
 
         System.out.println("Crediting completed");
     }
