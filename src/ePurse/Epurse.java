@@ -97,9 +97,9 @@ public class Epurse extends Applet implements ISO7816 {
     private final static byte NONCE_LENGTH = (byte) 2;
     private final static byte AMOUNT_LENGTH = (byte) 2;
     private final static byte DATE_LENGTH = (byte) 8;
-    private final static short MODULUS_LENGTH = 128;
+    private final static short MODULUS_LENGTH = 129;
     private final static short PRIVATE_EXPONENT_LENGTH = 128;
-    private final static byte PUBLIC_EXPONENT_LENGTH = 5; // TODO Is 3 or 4??
+    private final static byte PUBLIC_EXPONENT_LENGTH = 3; // TODO Is 3 or 4??
 
 
     /**
@@ -443,8 +443,8 @@ public class Epurse extends Applet implements ISO7816 {
         //TODO: verify [NONCE,PKC, PKT] with received sign
 
         //FIXME: 6f00 in the next line ...
-        boolean isVerified = verify(bytesTermKeyStored, (short) 0, ((short) bytesTermKeyStored.length), transientBuffer, (short) 0, (short) 128, backEndKey);
-        if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);
+//        boolean isVerified = verify(bytesTermKeyStored, (short) 0, ((short) bytesTermKeyStored.length), transientBuffer, (short) 0, (short) 128, backEndKey);
+//        if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);
 
         incrementNumberAndStore(lastNonce[0], lastNonce[1], (short) 0);
     }
@@ -678,7 +678,7 @@ public class Epurse extends Applet implements ISO7816 {
         // If signature verification not verified throw exception
         if (!isVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
-        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)2);
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)3);
 
         // Verify id
         if (Util.arrayCompare(id, (short) 0, transientBuffer, (short) 2, (short) 2) != 0x00) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);

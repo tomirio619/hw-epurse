@@ -18,16 +18,16 @@ public class BackEndCommunicator extends Thread{
     }
 
     private void setUp(){
-        try {
-            socket = new Socket("127.0.0.1", 9090);
-            outToServer = socket.getOutputStream();
-            inFromServer = socket.getInputStream();
-        } catch (IOException e) {
-            Alert alert = new Alert(Alert.AlertType.ERROR);
-            alert.setTitle("Socket connection error");
-            alert.setContentText("Unable to connect to specified host/socket");
-            alert.showAndWait();
-        }
+//        try {
+//
+//            outToServer = socket.getOutputStream();
+//            inFromServer = socket.getInputStream();
+//        } catch (IOException e) {
+//            Alert alert = new Alert(Alert.AlertType.ERROR);
+//            alert.setTitle("Socket connection error");
+//            alert.setContentText("Unable to connect to specified host/socket");
+//            alert.showAndWait();
+//        }
     }
 
     /**
@@ -37,21 +37,30 @@ public class BackEndCommunicator extends Thread{
      */
     public byte[] sendAndReceive(byte[] data) {
         try {
+            socket = new Socket("127.0.0.1", 9090);
             System.out.println("Sending data of length " + data.length);
             System.out.println(DatatypeConverter.printHexBinary(data));
-            DataOutputStream dOut = new DataOutputStream(outToServer);
+            DataOutputStream dOut = new DataOutputStream(socket.getOutputStream());
             dOut.writeInt(data.length);
             dOut.write(data);
 
-            DataInputStream dIn = new DataInputStream(inFromServer);
-
-            int length = dIn.readInt();
+            DataInputStream dIn;
             byte[] buffer = null;
-            if (length > 0){
-                buffer = new byte[length];
-                dIn.readFully(buffer, 0, length);
+            while(true){
+                dIn = new DataInputStream(socket.getInputStream());
+
+
+                int length = dIn.readInt();
+                if (length > 0){
+                    buffer = new byte[length];
+                    dIn.readFully(buffer, 0, length);
+                    break;
+                }
             }
 
+            dOut.close();
+            dIn.close();
+            socket.close();
             return buffer;
 
         } catch (IOException e) {

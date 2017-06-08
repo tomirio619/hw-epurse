@@ -46,7 +46,7 @@ public class GenKeyPair {
 		byte[] skbufexp = getBytes(publickey.getPublicExponent());
 
 		// Print public key to class file
-		File classFile = new File("src/TerminalKeys.java");
+		File classFile = new File("src/CardKeys.java");
 		printClassHEX(privatekey, publickey,(short) 0, (short)128, classFile );
 		//printClass(privatekey, pkbufmod, pkbufexp, skbufmod, skbufexp, (short) 0, (short)128, classFile);
 	}
@@ -58,7 +58,7 @@ public class GenKeyPair {
 			//pw.println("package tests;\n");
 			pw.println("//AUTO-GENERATED FILE");
 			pw.println("//DO NOT MODIFY");
-			pw.println("public class TerminalKeys {");
+			pw.println("public class CardKeys {");
 			pw.print("\tpublic static final String modulus = ");
 			pw.println("\""+pk.getModulus().toString(16)+"\";");
 
