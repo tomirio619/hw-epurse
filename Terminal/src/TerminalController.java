@@ -31,7 +31,7 @@ public class TerminalController implements Initializable, Observer {
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         System.out.println("Am I first?");
-        terminal = new Terminal();
+        terminal = new Terminal(new BackEndCommunicator());
 
         new Timer().schedule(new TimerTask() {
             @Override

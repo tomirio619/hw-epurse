@@ -20,20 +20,6 @@ public class BackEndCommunicator extends Thread implements IObservable{
     private List<Observer> observers;
 
     public BackEndCommunicator() {
-        setUp();
-    }
-
-    private void setUp(){
-//        try {
-//            socket = new Socket("127.0.0.1", 9090);
-//            outToServer = socket.getOutputStream();
-//            inFromServer = socket.getInputStream();
-//        } catch (IOException e) {
-//            Alert alert = new Alert(Alert.AlertType.ERROR);
-//            alert.setTitle("Socket connection error");
-//            alert.setContentText("Unable to connect to specified host/socket");
-//            alert.showAndWait();
-//        }
     }
 
     @Override

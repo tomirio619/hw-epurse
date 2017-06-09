@@ -74,12 +74,12 @@ public class Terminal extends Thread implements IObservable {
     private List<Observer> observers;
 
 
-    public Terminal() {
+    public Terminal(BackEndCommunicator be) {
         Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
         loadBackendKeys();
         loadTerminalKeys();
         secureRandom = new SecureRandom();
-        backend = new BackEndCommunicator();
+        this.backend = be;
 
         this.start();
     }
@@ -132,7 +132,7 @@ public class Terminal extends Thread implements IObservable {
 
                             testReloading();
 
-//                            testCrediting();
+                            testCrediting();
 
 //                            testDecommissioning();
 
@@ -718,21 +718,11 @@ public class Terminal extends Thread implements IObservable {
 
         //MessageCode || Tid || Amount || Signed(Tid || Amount) || Nonce || Card Id || Signature (Nonce || CardId)
 
-        //Todo, maybe sign the amount? Test this
+        //Sign the amount
 
         short testAmount = 500;
-        byte[] requestForReload = new  byte[6+128+incrementedNonce.length];
+        byte[] requestForReload = getReloadRequest(testAmount, incrementedNonce);
 
-        requestForReload[0] = 0x00;
-        requestForReload[1] = 0x04;
-        requestForReload[2] = terminalId[0];
-        requestForReload[3] = terminalId[1];
-        requestForReload[4] = (byte) (testAmount >> 8);
-        requestForReload[5] = (byte) testAmount;
-        byte[] amountSigned = sign(new byte[]{terminalId[0], terminalId[1], requestForReload[4], requestForReload[5]}); //Sign the terminal Id || Amount
-
-        Util.arrayCopy(amountSigned, (short) 0, requestForReload, (short) 6, (short) amountSigned.length);
-        Util.arrayCopy(incrementedNonce, (short) 0, requestForReload, (short) (6+amountSigned.length), (short) incrementedNonce.length);
 
         //Receive bytes from the backend
         byte[] backendResponse = backend.sendAndReceive(requestForReload);  //Returns Nonce || newbalance || signed
@@ -750,8 +740,7 @@ public class Terminal extends Thread implements IObservable {
         //Send to card (Nonce, Id, Amount) || signed
         byte[] incrementNonce = incrementNonceBy(backendResponse[0], backendResponse[1], 1);
         short balance = Util.makeShort(backendResponse[2], backendResponse[3]);
-        short amount = 90;
-        short newBalance = (short) (balance + amount);
+        short newBalance = (short) (balance + testAmount);
 
         byte [] dataToSend = new byte[]{
                 incrementNonce[0],  //Nonce received from backend incremented
@@ -772,6 +761,22 @@ public class Terminal extends Thread implements IObservable {
         responseAPDU = ch.transmit(hiAPDU);
         System.out.println("RELOADING_UPDATE: " + Integer.toHexString(responseAPDU.getSW()));
         System.out.println("Response: " + DatatypeConverter.printHexBinary(responseAPDU.getData()));
+    }
+
+    private byte[] getReloadRequest(short amount, byte[] signedCard){
+        byte[] requestForReload = new  byte[6+128+signedCard.length];
+
+        requestForReload[0] = 0x00;
+        requestForReload[1] = 0x04;
+        requestForReload[2] = terminalId[0];
+        requestForReload[3] = terminalId[1];
+        requestForReload[4] = (byte) (amount >> 8);
+        requestForReload[5] = (byte) amount;
+        byte[] amountSigned = sign(new byte[]{terminalId[0], terminalId[1], requestForReload[4], requestForReload[5]}); //Sign the terminal Id || Amount
+
+        Util.arrayCopy(amountSigned, (short) 0, requestForReload, (short) 6, (short) amountSigned.length);
+        Util.arrayCopy(signedCard, (short) 0, requestForReload, (short) (6+amountSigned.length), (short) signedCard.length);
+        return requestForReload;
     }
 
     /**
@@ -829,20 +834,7 @@ public class Terminal extends Thread implements IObservable {
         //Forward the request to the backend
 
         // Request the correct balance (ie. reloading with amount 0)
-
-        short testAmount = 0;
-        byte[] requestForReload = new  byte[4+incrementedNonce.length];
-
-        requestForReload[0] = 0x00;
-        requestForReload[1] = 0x04;
-
-        byte[] amountByte = new byte[]{
-                (byte) (testAmount >> 8),
-                (byte) testAmount
-        };
-
-        Util.arrayCopy(amountByte, (short) 0, requestForReload, (short) 2, (short) 2);
-        Util.arrayCopy(incrementedNonce, (short) 0, requestForReload, (short) 4, (short) incrementedNonce.length);
+        byte[] requestForReload = getReloadRequest((short) 0, incrementedNonce);
 
         //Receive bytes from the backend
         byte[] backendResponse = backend.sendAndReceive(requestForReload);  //Returns Nonce || newbalance || signed
@@ -859,7 +851,7 @@ public class Terminal extends Thread implements IObservable {
 
         nonceBytes = incrementNonceBy(backendResponse[0], backendResponse[1], 1);
 
-        short newBalance = (short) (receivedBalance - testAmount);
+        short newBalance = (short) (receivedBalance - creditAmount);
 
         byte[] dataToSend = null;
         byte instruction;
@@ -913,6 +905,18 @@ public class Terminal extends Thread implements IObservable {
             responseAPDU = ch.transmit(hiAPDU);
 
             //Todo: Check if the pin is good
+            if (responseAPDU.getSW() == 27013){
+                //Pin is wrong
+                System.err.println("Wrong pin!");
+                return;
+            }else if (responseAPDU.getSW() == 0x6305){
+                //No more pin attempts
+                System.err.println("No more pin attempts");
+                return;
+            }else if (responseAPDU.getSW() == 0x6301){
+                System.err.println("PIN is required");
+                return;
+            }
         }else{
             //Todo: implement this on the card
 //            hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, bytesApdu, bytesApdu.length);
@@ -1058,7 +1062,7 @@ public class Terminal extends Thread implements IObservable {
     }
 
     public static void main(String[] args) {
-        Terminal terminal = new Terminal();
+        Terminal terminal = new Terminal(new BackEndCommunicator());
         //new Thread(Terminal).run();
     }
 
