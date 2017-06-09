@@ -118,6 +118,8 @@ public class Epurse extends Applet implements ISO7816 {
      */
     private byte status;
 
+    private byte[] isPinChecked;
+
 
     /**
      * Ram volatile variables
@@ -140,6 +142,7 @@ public class Epurse extends Applet implements ISO7816 {
         sessionStatus = JCSystem.makeTransientByteArray((short) 1, JCSystem.CLEAR_ON_RESET);
         lastNonce = JCSystem.makeTransientByteArray((short)2,JCSystem.CLEAR_ON_RESET);
         amount = JCSystem.makeTransientByteArray((short)2,JCSystem.CLEAR_ON_RESET);
+        isPinChecked = JCSystem.makeTransientByteArray((short) 1, JCSystem.CLEAR_ON_RESET);
 
         pubKey = (RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC, KeyBuilder.LENGTH_RSA_1024, false);
         privKey = (RSAPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PRIVATE, KeyBuilder.LENGTH_RSA_1024, false);
@@ -285,7 +288,7 @@ public class Epurse extends Applet implements ISO7816 {
                     status = STATE_PERSONALIZED;
                     break;
                 default:
-                    throw new ISOException(SW_INS_NOT_SUPPORTED);
+                    throw new ISOException((short) 77);
             }
 
         } else if (status == STATE_PERSONALIZED) {
@@ -306,7 +309,7 @@ public class Epurse extends Applet implements ISO7816 {
                         break;
                     default:
                         //ISOException.throwIt(headerBuffer[OFFSET_INS]);
-                        throw new ISOException(SW_INS_NOT_SUPPORTED);
+                        throw new ISOException((short) 99);
                 }
 
             } else if (sessionStatus[0] == TERMINAL_AUTH) {
@@ -355,7 +358,7 @@ public class Epurse extends Applet implements ISO7816 {
                         processCommitPayment(apdu);
                         break;
                     default:
-                        throw new ISOException(SW_INS_NOT_SUPPORTED);
+                        throw new ISOException((short) 88);
                 }
 
             }else ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
@@ -586,14 +589,18 @@ public class Epurse extends Applet implements ISO7816 {
             if (!pin.check(pinBytes, (short) 0, PIN_LENGTH))
                 ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
+            isPinChecked[0] = 0x56;
+
             //Get new balance and amount
             Util.arrayCopy(transientBuffer, (short) 2, amount, (short) 0, (short) 2);
 
         }else if (headerBuffer[ISO7816.OFFSET_P1]==1){
-            if(pin.isValidated()) {
+            //Adding the if pin validated check yielded an error
+            if (isPinChecked[0] == 0x56){
                 pay(apdu);
-            }else
+            }else{
                 ISOException.throwIt(SW_PIN_VERIFICATION_REQUIRED);
+            }
 
 
         }else ISOException.throwIt(SW_COMMAND_NOT_ALLOWED);

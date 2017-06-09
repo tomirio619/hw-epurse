@@ -129,7 +129,7 @@ public class Terminal extends Thread implements IObservable {
                             System.out.println(DatatypeConverter.printHexBinary(selectApplet.getBytes()));
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
 
-                            personalizationFull();
+//                            personalizationFull();
 
                             testTerminalAuth();
 
@@ -624,6 +624,7 @@ public class Terminal extends Thread implements IObservable {
             ResponseAPDU responsePrivate = ch.transmit(capdu);
             System.out.println("PERSONALIZATION_NEW_PIN: " + Integer.toHexString(responsePrivate.getSW()));
             update(new UpdateLogsEvent(DatatypeConverter.printHexBinary(pin)));
+            System.out.println("PIN "+ DatatypeConverter.printHexBinary(pin));
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -849,7 +850,7 @@ public class Terminal extends Thread implements IObservable {
         //Receive the correct balance from the backend
         short receivedBalance = Util.makeShort(backendResponse[2], backendResponse[3]);
         //Todo make credit amount non-fixed
-        short creditAmount = 12;
+        short creditAmount = 88;
 
         if(receivedBalance-creditAmount< 0){
             System.out.println("Error negative balance");
@@ -930,7 +931,6 @@ public class Terminal extends Thread implements IObservable {
                 return;
             }
         }else{
-            //Todo: implement this on the card
             System.out.println("No pin data to card " + DatatypeConverter.printHexBinary(dataToSend));
             hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, dataToSend, dataToSend.length);
             responseAPDU = ch.transmit(hiAPDU);
