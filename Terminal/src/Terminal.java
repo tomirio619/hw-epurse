@@ -129,7 +129,7 @@ public class Terminal extends Thread implements IObservable {
                             System.out.println(DatatypeConverter.printHexBinary(selectApplet.getBytes()));
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
 
-                            personalizationFull();
+//                            personalizationFull();
 
                             testTerminalAuth();
 
