@@ -11,6 +11,7 @@ import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 import javax.smartcardio.*;
 import javax.xml.bind.DatatypeConverter;
+import javax.xml.crypto.Data;
 import java.math.BigInteger;
 import java.security.*;
 import java.security.interfaces.RSAKey;
@@ -143,12 +144,12 @@ public class Terminal extends Thread implements IObservable {
 //                            Util.arrayCopy(signed, (short) 0, dataAndSigned, (short) 1, (short) 128);
 //                            handleSignature(publicKeyCard, 1, dataAndSigned);
 
-                            testReloading();
+//                            testReloading();
 
-                            testCrediting();
+//                            testCrediting();
 
                             //Todo: finish decommissioning
-                            //testDecommissioning(ch);
+                            testDecommissioning();
 
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -497,6 +498,7 @@ public class Terminal extends Thread implements IObservable {
     }
 
     public void testPersonalizationHi() throws CardException, NoSuchAlgorithmException {
+        //Todo generate fresh card keys
 
         //Get keys from CardKeys.java (keys stored in the database)
         RSAPrivateKey cardPrivateKey = null;
@@ -515,9 +517,6 @@ public class Terminal extends Thread implements IObservable {
         }
 
         publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
-
-        //byte [] nonceBytes = new byte[2];
-        //secureRandom.nextBytes(nonceBytes);
 
         byte[] modulus = getBytes(cardPrivateKey.getModulus());
         // Sending modulus private key
@@ -646,8 +645,18 @@ public class Terminal extends Thread implements IObservable {
         //Verify signature
         handleSignature(publicKeyCard, 2, dataRec);
 
-        //Todo: send the received message to the backend
+        //send the received message to the backend
 
+        // Messagecode (3) || Nonce || Card Id || Signed (Nonce || Card Id)
+
+        byte[] dataForBackend = new byte[2+dataRec.length];
+        dataForBackend[0] = 0x00;
+        dataForBackend[1] = 0x03;
+        Util.arrayCopy(dataRec, (short) 0, dataForBackend, (short) 2, (short) dataRec.length);
+
+        byte[] backendResponse = backend.sendAndReceive(dataForBackend);
+
+        System.out.println("Decomm response backend: " + DatatypeConverter.printHexBinary(backendResponse));
 
         //Receive a message from the backend
         byte[] nonceIncrementedSigned = new byte[2+500]; //Receive this from the backend
