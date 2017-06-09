@@ -1,17 +1,23 @@
+import Events.ErrorEvent;
+import Events.IObservable;
 import javafx.scene.control.Alert;
 
 import javax.xml.bind.DatatypeConverter;
 import java.io.*;
 import java.net.Socket;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Observable;
+import java.util.Observer;
 
 /**
  * Created by appie on 4-6-2017.
  */
-public class BackEndCommunicator extends Thread{
+public class BackEndCommunicator extends Thread implements IObservable{
 
     private Socket socket;
-    private OutputStream outToServer;
-    private InputStream inFromServer;
+    private List<Observer> observers;
 
     public BackEndCommunicator() {
         setUp();
@@ -28,6 +34,24 @@ public class BackEndCommunicator extends Thread{
 //            alert.setContentText("Unable to connect to specified host/socket");
 //            alert.showAndWait();
 //        }
+    }
+
+    @Override
+    public synchronized void addObserver(Observer o) {
+        if (observers == null){
+            observers = new ArrayList<>();
+        }
+        observers.add(o);
+    }
+
+    @Override
+    public void update(Object event) {
+        if (observers == null){
+            return;
+        }
+        for (Observer o : observers){
+            o.update(null, event);
+        }
     }
 
     /**
@@ -50,6 +74,24 @@ public class BackEndCommunicator extends Thread{
                 dIn = new DataInputStream(socket.getInputStream());
 
                 int length = dIn.readInt();
+                if (length == 4){
+                    //Handle the exception
+                    buffer = new byte[length];
+                    dIn.read(buffer, 0, length); //Read the error
+
+                    //Convert to integer
+                    int errorCode = ByteBuffer.wrap(buffer).getInt();
+                    System.out.println("Errorcode " + errorCode);
+                    switch (errorCode){
+                        case 3:
+                            //Signature is not valid
+                            this.update(new ErrorEvent("Signature is not valid"));
+                            break;
+                    }
+//                    this.update(new ErrorEvent());
+                    break;
+                }
+
                 if (length > 0){
                     buffer = new byte[length];
                     dIn.readFully(buffer, 0, length);

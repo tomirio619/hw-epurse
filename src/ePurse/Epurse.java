@@ -728,4 +728,8 @@ public class Epurse extends Applet implements ISO7816 {
         }
     }
 
+    public void deselect(){
+        pin.reset();
+    }
+
 }
