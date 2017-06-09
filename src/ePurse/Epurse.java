@@ -288,7 +288,7 @@ public class Epurse extends Applet implements ISO7816 {
                     status = STATE_PERSONALIZED;
                     break;
                 default:
-                    throw new ISOException((short) 77);
+                    throw new ISOException( SW_INS_NOT_SUPPORTED);
             }
 
         } else if (status == STATE_PERSONALIZED) {
@@ -344,7 +344,7 @@ public class Epurse extends Applet implements ISO7816 {
                         processCommitPayment(apdu);
                         break;
                     default:
-                        throw new ISOException((short) 88);
+                        throw new ISOException( SW_INS_NOT_SUPPORTED);
                 }
 
             }else ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
