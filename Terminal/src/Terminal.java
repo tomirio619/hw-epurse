@@ -1,5 +1,6 @@
 import Events.IObservable;
 import com.sun.xml.internal.bind.v2.runtime.unmarshaller.ValuePropertyLoader;
+import javacard.framework.APDU;
 import javacard.framework.ISO7816;
 import javacard.framework.Util;
 import org.bouncycastle.jcajce.provider.asymmetric.rsa.BCRSAPublicKey;
@@ -124,7 +125,20 @@ public class Terminal extends Thread implements IObservable {
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
 
                             personalizationFull();
-                            publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
+
+//                            byte[] data = new byte[]{0x42};
+//                            byte[] signed = sign(privateKeyBackend, data);
+//                            byte[] dataAndSigned = new byte[1+128];
+//                            Util.arrayCopy(data, (short) 0, dataAndSigned, (short) 0 , (short) 1);
+//                            Util.arrayCopy(signed, (short) 0, dataAndSigned, (short) 1, (short) 128);
+//
+//                            CommandAPDU testSign = new CommandAPDU(CLASS, 0x43, 0, 0, dataAndSigned, dataAndSigned.length);
+//                            ResponseAPDU a = ch.transmit(testSign);
+//
+//                            System.out.println(DatatypeConverter.printHexBinary(a.getData()));
+//                            System.out.println(a.getSW());
+
+//                            publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
 
                             //Todo: fix the hardcoded key
 //                            RSAPublicKey loadedPublicKey =  loadCardKeys();
@@ -330,7 +344,6 @@ public class Terminal extends Thread implements IObservable {
         Signature signature = null;
         try {
             signature = Signature.getInstance("SHA1withRSA", "BC");
-            System.out.println(DatatypeConverter.printHexBinary(publicKey.getEncoded()));
             signature.initVerify(publicKey);
             signature.update(plainText);
             return signature.verify(signedBytes, 0, signedBytes.length);
@@ -386,7 +399,6 @@ public class Terminal extends Thread implements IObservable {
         System.out.println("VERIFICATION_HI: " + Integer.toHexString(responseAPDU.getSW()));
 
         byte [] ca = responseAPDU.getData(); // Data Ca{Ca}SKC
-
 
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], ca[0], ca[1], 1)){
             System.err.println("Nonce not incremented");
@@ -491,7 +503,10 @@ public class Terminal extends Thread implements IObservable {
         Util.arrayCopy(modulusBytesBE,(short)0,bytesKeyBE,(short)exponentBytesBE.length,(short)modulusBytesBE.length);
         CommandAPDU capdu;
         //Changed to PERSONALIZATION_BACKEND_KEY 0x20
-        capdu = new CommandAPDU(CLASS, PERSONALIZATION_BACKEND_KEY, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyBE);
+
+        System.out.println("Backend Key Bytes " + DatatypeConverter.printHexBinary(bytesKeyBE));
+
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_BACKEND_KEY, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyBE, bytesKeyBE.length);
         ResponseAPDU responsePrivate = ch.transmit(capdu);
         System.out.println("BACKEND_KEY: " + Integer.toHexString(responsePrivate.getSW()));
 
@@ -643,7 +658,7 @@ public class Terminal extends Thread implements IObservable {
         }
 
         //Verify signature
-        handleSignature(publicKeyCard, 2, dataRec);
+        handleSignature(publicKeyCard, 4, dataRec);
 
         //send the received message to the backend
 
@@ -654,26 +669,24 @@ public class Terminal extends Thread implements IObservable {
         dataForBackend[1] = 0x03;
         Util.arrayCopy(dataRec, (short) 0, dataForBackend, (short) 2, (short) dataRec.length);
 
+        //Receive the reponse from the backend
         byte[] backendResponse = backend.sendAndReceive(dataForBackend);
 
         System.out.println("Decomm response backend: " + DatatypeConverter.printHexBinary(backendResponse));
 
-        //Receive a message from the backend
-        byte[] nonceIncrementedSigned = new byte[2+500]; //Receive this from the backend
         byte[] backendNonceIncremented = new byte[2];
-        Util.arrayCopy(nonceIncrementedSigned, (short) 0, backendNonceIncremented, (short) 0, (short) 2); //Copy the plaintext nonce of the backend
+        Util.arrayCopy(backendResponse, (short) 0, backendNonceIncremented, (short) 0, (short) 2); //Copy the plaintext nonce of the backend
 
-        //Check if nonce has been incremented
+        //Check if nonce has been incremented by 2 from the backend
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], backendNonceIncremented[0], backendNonceIncremented[1], 2)){
             System.err.println("Nonce has not been incremented");
             return;
         }
 
-        handleSignature(publicKeyBackend, 2, backendNonceIncremented);
+        handleSignature(publicKeyBackend, 4, backendResponse);
 
         //Forward this message to the card
-
-        hiAPDU = new CommandAPDU(CLASS, DECOMMISSIONING_CLEAR, 0, 0, nonceIncrementedSigned, nonceIncrementedSigned.length);
+        hiAPDU = new CommandAPDU(CLASS, DECOMMISSIONING_CLEAR, 0, 0, backendResponse, backendResponse.length);
         responseAPDU = ch.transmit(hiAPDU);
         System.out.println("DECOMMISSIONING_CLEAR: " + Integer.toHexString(responseAPDU.getSW()));
     }

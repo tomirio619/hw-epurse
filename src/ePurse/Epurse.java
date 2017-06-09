@@ -5,6 +5,7 @@ import javacard.security.*;
 import javacardx.crypto.Cipher;
 
 import javax.print.attribute.standard.MediaSize;
+import java.io.IOError;
 
 /**
  * @noinspection ClassNamePrefixedWithPackageName, ImplicitCallToSuper, MethodOverridesStaticMethodOfSuperclass, ResultOfObjectAllocationIgnored
@@ -404,7 +405,6 @@ public class Epurse extends Applet implements ISO7816 {
      * @param apdu
      */
     private void processVerificationV(APDU apdu) {
-
         short datalength = (short) (headerBuffer[OFFSET_LC] & 0x00FF);
         readBuffer(apdu, transientBuffer, (short) 0, datalength);
 
@@ -453,27 +453,11 @@ public class Epurse extends Applet implements ISO7816 {
      * @param apdu
      */
     private void insKeyPairPrivate(APDU apdu) {
-        byte datalength = headerBuffer[OFFSET_LC];
+        readBuffer(apdu, transientBuffer, (short) 0 , (short) (128+1));
+        boolean verified = verify(transientBuffer, (short) 0, (short) 1, transientBuffer, (short) 1, (short) 128, backEndKey);
 
-        //After setIncomingAndReceive data is available in buffer RD
-        byte byteRead = (byte) (apdu.setIncomingAndReceive());
-
-        if (byteRead != datalength) ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
-
-        Util.arrayCopy(apdu.getBuffer(), OFFSET_CDATA, transientBuffer, (short) 0, datalength);
-
-        // inform system that the applet has finished
-        // processing the command and the system should
-        // now prepare to construct a response APDU
-        // which contains data field SD
-        short le = apdu.setOutgoing();
-
-        //informs the CAD the actual number of bytes ret
-
-        transientBuffer[0] = (byte) 42;
-        short length = sign(transientBuffer, (short) 0, (short) 1, transientBuffer, (short) 1);
-        apdu.setOutgoingLength((short) (1 + length));
-        apdu.sendBytesLong(transientBuffer, (short) 0, (short) (1 + length));
+        if (verified) ISOException.throwIt((short) 99);
+        ISOException.throwIt((short) 111);
     }
 
     /**
@@ -482,7 +466,7 @@ public class Epurse extends Applet implements ISO7816 {
      */
     private void saveBackendKey(APDU apdu) {
         short datalength = (short) (headerBuffer[OFFSET_LC] & 0x00FF);
-        Util.arrayCopy(apdu.getBuffer(), OFFSET_CDATA, transientBuffer, (short) 0, datalength);
+        readBuffer(apdu, transientBuffer, (short) 0, datalength);
 
         short exponentLength = (short) (headerBuffer[OFFSET_P1] & 0x00FF);
         short modulusLength = (short) (headerBuffer[OFFSET_P2] & 0x00FF);
@@ -666,7 +650,7 @@ public class Epurse extends Applet implements ISO7816 {
         if (Util.arrayCompare(id, (short) 0, transientBuffer, (short) 2, (short) 2) != 0x00) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
         // Verify nonce
-        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)2);
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)1);
 
         // We sing wit offset 2 to prevent the overridign of the nonce
         short signedResponseLength = sign(transientBuffer, (short) 0, (short) 2, transientBuffer, (short) 2);

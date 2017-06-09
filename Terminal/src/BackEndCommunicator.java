@@ -39,7 +39,7 @@ public class BackEndCommunicator extends Thread{
         try {
             socket = new Socket("127.0.0.1", 9090);
             System.out.println("Sending data of length " + data.length);
-            System.out.println(DatatypeConverter.printHexBinary(data));
+            System.out.println("About to send " + DatatypeConverter.printHexBinary(data));
             DataOutputStream dOut = new DataOutputStream(socket.getOutputStream());
             dOut.writeInt(data.length);
             dOut.write(data);
