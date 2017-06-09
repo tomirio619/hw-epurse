@@ -602,12 +602,38 @@ public class Epurse extends Applet implements ISO7816 {
 
     private void processCommitPayment(APDU apdu){
         readBuffer(apdu, transientBuffer, (short)0,(short) (headerBuffer[OFFSET_LC] & 0x00FF) );
-        pay(apdu);
+        byte[] payload = new byte[4];
+
+        // Check nonce is incremented +2
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short)0, (short)2);
+
+        // Get amount
+        Util.arrayCopy(transientBuffer, (short) 2, amount, (short) 0, (short) 2);
+
+        // Check we have enough balance
+        short sBalance = Util.makeShort(balance[0], balance[1]);
+        short sAmount = Util.makeShort(amount[0], amount[1]);
+        if((short) (sBalance-sAmount) < (short) 0) ISOException.throwIt(SW_DATA_INVALID);
+
+        // Copi nonde id and amount to sing
+        //Util.arrayCopy(lastNonce, (short) 0, transientBuffer, (short) 0, (short) 2);
+        Util.arrayCopy(id, (short) 0, transientBuffer, (short) 2, (short) 2);
+        Util.arrayCopy(amount, (short) 0, transientBuffer, (short) 4, (short) 2);
+
+        // We sing wit offset 2 to prevent the overridign of the nonce
+        short signedResponseLength = sign(transientBuffer, (short) 0, (short) 6, transientBuffer, (short) 6);
+
+        //Send the response
+        apdu.setOutgoing();
+        apdu.setOutgoingLength((short) (6 + signedResponseLength));
+        apdu.sendBytesLong(transientBuffer, (short) 0, (short) (6 + signedResponseLength));
+        //pay(apdu);
     }
 
     // Commit the payment, done after verify the pin (CREDIT_COMMIT_PIN) or pay without pin (CREDIT_COMMIT_NO_PIN)
     private void pay(APDU apdu){
 
+        //Util.arrayCopy(transientBuffer, (short) 2, amount, (short) 0, (short) 2);
         // in the second apdu we receive the nonec amount balance signed
         byte[] payload = new byte[4];
 
