@@ -1,13 +1,9 @@
-
-
 import javax.xml.bind.DatatypeConverter;
-import java.io.*;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.net.Socket;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Observable;
-import java.util.Observer;
 
 /**
  * Created by appie on 4-6-2017.
@@ -21,6 +17,7 @@ public class BackEndCommunicator extends Thread {
 
     /**
      * Send data to the backend and wait for the response
+     *
      * @param data
      * @return
      */
@@ -35,11 +32,11 @@ public class BackEndCommunicator extends Thread {
 
             DataInputStream dIn;
             byte[] buffer = null;
-            while(true){
+            while (true) {
                 dIn = new DataInputStream(socket.getInputStream());
 
                 int length = dIn.readInt();
-                if (length == 4){
+                if (length == 4) {
                     //Handle the exception
                     buffer = new byte[length];
                     dIn.read(buffer, 0, length); //Read the error
@@ -47,7 +44,7 @@ public class BackEndCommunicator extends Thread {
                     //Convert to integer
                     int errorCode = ByteBuffer.wrap(buffer).getInt();
                     System.out.println("Errorcode " + errorCode);
-                    switch (errorCode){
+                    switch (errorCode) {
                         case 3:
                             //Signature is not valid
                             System.out.println("Signature not valid");
@@ -56,7 +53,7 @@ public class BackEndCommunicator extends Thread {
                     break;
                 }
 
-                if (length > 0){
+                if (length > 0) {
                     buffer = new byte[length];
                     dIn.readFully(buffer, 0, length);
                     break;
@@ -73,7 +70,6 @@ public class BackEndCommunicator extends Thread {
         }
         return null;
     }
-
 
 
 }

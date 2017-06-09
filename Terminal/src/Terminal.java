@@ -17,7 +17,10 @@ import java.security.spec.InvalidKeySpecException;
 import java.security.spec.RSAPrivateKeySpec;
 import java.security.spec.RSAPublicKeySpec;
 import java.security.spec.X509EncodedKeySpec;
-import java.util.*;
+import java.util.List;
+import java.util.Observer;
+import java.util.Random;
+import java.util.Scanner;
 
 
 /**
@@ -78,6 +81,11 @@ public class Terminal extends Thread {
         this.start();
     }
 
+    public static void main(String[] args) {
+        Terminal terminal = new Terminal(new BackEndCommunicator());
+        //new Thread(Terminal).run();
+    }
+
     @Override
     public void run() {
         try {
@@ -131,7 +139,7 @@ public class Terminal extends Thread {
         }
     }
 
-    void loadBackendKeys()   {
+    void loadBackendKeys() {
 
         // Load the key into BigIntegers
         BigInteger modulus = new BigInteger(BackendKeys.privateModulusBackend, 16);
@@ -162,12 +170,12 @@ public class Terminal extends Thread {
     }
 
     // Type 0 public 1 private
-    private RSAKey keyFromEncoded(byte[] encodedKey, int type){
+    private RSAKey keyFromEncoded(byte[] encodedKey, int type) {
         Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
         try {
-            if(type == 0){
+            if (type == 0) {
                 return (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(encodedKey));
-            }else{
+            } else {
                 return (RSAPrivateKey) KeyFactory.getInstance("RSA").generatePrivate(new X509EncodedKeySpec(encodedKey));
             }
         } catch (NoSuchAlgorithmException | InvalidKeySpecException ex) {
@@ -177,13 +185,11 @@ public class Terminal extends Thread {
         return null;
     }
 
-
-
     public byte[] hexStringToByteArray(String s) {
         int len = s.length();
         byte[] data = new byte[len / 2];
         for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)+Character.digit(s.charAt(i + 1), 16));
+            data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4) + Character.digit(s.charAt(i + 1), 16));
         }
         return data;
     }
@@ -222,6 +228,7 @@ public class Terminal extends Thread {
 
     /**
      * Checks whether a nonce (oldNonce1 || oldNonce2) + incrementedBy == nonce (newNonce1 || newNonce2)
+     *
      * @param oldNonce1
      * @param oldNonce2
      * @param newNonce1
@@ -229,7 +236,7 @@ public class Terminal extends Thread {
      * @param incrementedBy
      * @return
      */
-    private boolean isNonceIncrementedBy(byte oldNonce1, byte oldNonce2, byte newNonce1, byte newNonce2, int incrementedBy){
+    private boolean isNonceIncrementedBy(byte oldNonce1, byte oldNonce2, byte newNonce1, byte newNonce2, int incrementedBy) {
         short old = Util.makeShort(oldNonce1, oldNonce2);
         short newNonce = Util.makeShort(newNonce1, newNonce2);
 
@@ -238,15 +245,16 @@ public class Terminal extends Thread {
 
     /**
      * Sign a byte array with the key of the terminal
+     *
      * @param textToSign
      * @return
      */
-    private byte[] sign(byte[] textToSign){
+    private byte[] sign(byte[] textToSign) {
         Signature signature = null;
         try {
             signature = Signature.getInstance("SHA1withRSA", "BC");
             signature.initSign(privateKeyTerminal);
-            signature.update(textToSign,0,textToSign.length);
+            signature.update(textToSign, 0, textToSign.length);
             return signature.sign();
         } catch (NoSuchAlgorithmException | NoSuchProviderException | SignatureException | InvalidKeyException e) {
             e.printStackTrace();
@@ -257,16 +265,17 @@ public class Terminal extends Thread {
 
     /**
      * Sign a byte array with a specified RSA signing key
+     *
      * @param signingKey
      * @param textToSign
      * @return
      */
-    private byte[] sign(RSAPrivateKey signingKey, byte[] textToSign){
+    private byte[] sign(RSAPrivateKey signingKey, byte[] textToSign) {
         Signature signature = null;
         try {
             signature = Signature.getInstance("SHA1withRSA", "BC");
             signature.initSign(signingKey);
-            signature.update(textToSign,0,textToSign.length);
+            signature.update(textToSign, 0, textToSign.length);
             return signature.sign();
         } catch (NoSuchAlgorithmException | NoSuchProviderException | SignatureException | InvalidKeyException e) {
             e.printStackTrace();
@@ -277,12 +286,13 @@ public class Terminal extends Thread {
 
     /**
      * Verifies a signature given a public key, plaintext and signature byte array
+     *
      * @param publicKey
      * @param plainText
      * @param signedBytes
      * @return
      */
-    private boolean verify(RSAPublicKey publicKey, byte[] plainText, byte[] signedBytes){
+    private boolean verify(RSAPublicKey publicKey, byte[] plainText, byte[] signedBytes) {
         Signature signature = null;
         try {
             signature = Signature.getInstance("SHA1withRSA", "BC");
@@ -297,21 +307,22 @@ public class Terminal extends Thread {
 
     /**
      * Handles a signature verification, including the splitting of the data array into a plaintext and signature part
+     *
      * @param verifyKey
      * @param plainTextLength
      * @param data
      */
-    private void handleSignature(RSAPublicKey verifyKey, int plainTextLength, byte[] data){
+    private void handleSignature(RSAPublicKey verifyKey, int plainTextLength, byte[] data) {
         //First split the data into the plaintext byte array and the signature byte array
         byte[] plainText = new byte[plainTextLength];
         Util.arrayCopy(data, (short) 0, plainText, (short) 0, (short) plainTextLength);
 
-        byte[] signature = new byte[data.length-plainTextLength];
+        byte[] signature = new byte[data.length - plainTextLength];
         Util.arrayCopy(data, (short) plainTextLength, signature, (short) 0, (short) (data.length - plainTextLength));
 
-        if (verify(verifyKey, plainText, signature)){
+        if (verify(verifyKey, plainText, signature)) {
             System.out.println("Signature verified!");
-        }else{
+        } else {
             System.err.println("Signature verification failed!");
             return;
         }
@@ -319,12 +330,13 @@ public class Terminal extends Thread {
 
     /**
      * Receives two bytes and an incrementation value and returns the incremented byte array
+     *
      * @param n1
      * @param n2
      * @param incrementBy
      * @return
      */
-    private byte[] incrementNonceBy(byte n1, byte n2, int incrementBy){
+    private byte[] incrementNonceBy(byte n1, byte n2, int incrementBy) {
         short old = Util.makeShort(n1, n2);
         old += incrementBy;
 
@@ -341,20 +353,20 @@ public class Terminal extends Thread {
 
         System.out.println("-----Test Verification Terminal-----");
 
-        byte [] nonceBytes = new byte[2];
+        byte[] nonceBytes = new byte[2];
         secureRandom.nextBytes(nonceBytes);
         CommandAPDU hiAPDU = new CommandAPDU(CLASS, VERIFICATION_HI, 0, 0, nonceBytes, 2);
         ResponseAPDU responseAPDU = ch.transmit(hiAPDU);
         System.out.println("VERIFICATION_HI: " + Integer.toHexString(responseAPDU.getSW()));
 
-        byte [] ca = responseAPDU.getData(); // Data Ca{Ca}SKC
+        byte[] ca = responseAPDU.getData(); // Data Ca{Ca}SKC
 
-        if (responseAPDU.getSW() == 0x6303){
+        if (responseAPDU.getSW() == 0x6303) {
             System.out.println("Card was blocked");
             return;
         }
 
-        if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], ca[0], ca[1], 1)){
+        if (!isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], ca[0], ca[1], 1)) {
             System.err.println("Nonce not incremented");
         }
 
@@ -365,11 +377,11 @@ public class Terminal extends Thread {
         Util.arrayCopy(terminalId, (short) 0, TA, (short) 2, (short) 2);
         byte[] TASigned = sign(TA);
 
-        byte[] CaTaTaSigned = new byte[ca.length+4+TASigned.length+2]; //We send 4 bytes of Ta, 4 bytes of CA and then the signed part of TA prepended by the message code (2 bytes)
+        byte[] CaTaTaSigned = new byte[ca.length + 4 + TASigned.length + 2]; //We send 4 bytes of Ta, 4 bytes of CA and then the signed part of TA prepended by the message code (2 bytes)
         Util.arrayCopy(new byte[]{0x00, 0x01}, (short) 0, CaTaTaSigned, (short) 0, (short) 2); //Add the message code
         Util.arrayCopy(ca, (short) 0, CaTaTaSigned, (short) 2, (short) ca.length); //CA Part
-        Util.arrayCopy(TA, (short) 0, CaTaTaSigned, (short) (2+ca.length), (short) 4); //Plaintext of TA
-        Util.arrayCopy(TASigned, (short) 0, CaTaTaSigned, (short) (2+ca.length+4), (short) TASigned.length);  //Copy everything else
+        Util.arrayCopy(TA, (short) 0, CaTaTaSigned, (short) (2 + ca.length), (short) 4); //Plaintext of TA
+        Util.arrayCopy(TASigned, (short) 0, CaTaTaSigned, (short) (2 + ca.length + 4), (short) TASigned.length);  //Copy everything else
 
         //Send everything to the backend
 
@@ -386,14 +398,14 @@ public class Terminal extends Thread {
         short encodedSize = 162;
 
         //Check if nonce is properly incremented
-        if (! isNonceIncrementedBy(nonce[0], nonce[1], v[0], v[1], 1)){
+        if (!isNonceIncrementedBy(nonce[0], nonce[1], v[0], v[1], 1)) {
             System.err.println("Nonce is not incremented!");
             return;
         }
 
         //Check if signature is valid
         byte[] vPlaintext = new byte[2 + encodedSize + exponentSize + modulusSize];
-        Util.arrayCopy(v, (short) 0, vPlaintext, (short) 0, (short) (v.length-128));
+        Util.arrayCopy(v, (short) 0, vPlaintext, (short) 0, (short) (v.length - 128));
 
         short signatureSize = (short) (v.length - vPlaintext.length);
         byte[] vSignature = new byte[signatureSize]; //Buffer for signature
@@ -415,7 +427,7 @@ public class Terminal extends Thread {
         System.out.println("Encoded public key bytes from DB " + DatatypeConverter.printHexBinary(publicKeyCardBytes));
 
         byte[] publicKeyTerminalBytes = new byte[exponentSize + modulusSize];
-        Util.arrayCopy(vPlaintext, (short) (2+encodedSize), publicKeyTerminalBytes, (short) 0, (short) (exponentSize+modulusSize));
+        Util.arrayCopy(vPlaintext, (short) (2 + encodedSize), publicKeyTerminalBytes, (short) 0, (short) (exponentSize + modulusSize));
 
         byte[] modulusBytes = new byte[modulusSize];
         byte[] exponentBytes = new byte[exponentSize];
@@ -450,15 +462,16 @@ public class Terminal extends Thread {
 
     /**
      * Send the key of the backend to the card, so that it is possible for the card to verify the signatures of the backend
+     *
      * @throws CardException
      */
     public void testSendBackendKey() throws CardException {
         // Send BE key for verify signatures(this will be done in the personalization)
         byte[] exponentBytesBE = getBytes(publicKeyBackend.getPublicExponent());
         byte[] modulusBytesBE = getBytes(publicKeyBackend.getModulus());
-        byte[] bytesKeyBE = new byte [modulusBytesBE.length+exponentBytesBE.length];
-        Util.arrayCopy(exponentBytesBE,(short)0,bytesKeyBE,(short)0,(short)exponentBytesBE.length);
-        Util.arrayCopy(modulusBytesBE,(short)0,bytesKeyBE,(short)exponentBytesBE.length,(short)modulusBytesBE.length);
+        byte[] bytesKeyBE = new byte[modulusBytesBE.length + exponentBytesBE.length];
+        Util.arrayCopy(exponentBytesBE, (short) 0, bytesKeyBE, (short) 0, (short) exponentBytesBE.length);
+        Util.arrayCopy(modulusBytesBE, (short) 0, bytesKeyBE, (short) exponentBytesBE.length, (short) modulusBytesBE.length);
         CommandAPDU capdu;
         //Changed to PERSONALIZATION_BACKEND_KEY 0x20
 
@@ -512,12 +525,13 @@ public class Terminal extends Thread {
 
     /**
      * Create an creation and expiration date
+     *
      * @throws CardException
      */
     private void testPesonalizationDates() throws CardException {
 
         // Get current date unix seconds
-        int unixTime = (int)(System.currentTimeMillis() / 1000);
+        int unixTime = (int) (System.currentTimeMillis() / 1000);
         byte[] personalizedDate = new byte[]{
                 (byte) (unixTime >> 24),
                 (byte) (unixTime >> 16),
@@ -535,7 +549,7 @@ public class Terminal extends Thread {
                 (byte) expirationTime
         };
 
-        byte[] requestId = new byte[162+6];
+        byte[] requestId = new byte[162 + 6];
         byte[] publicKeyCardBytes = tempCardPublicKey.getEncoded();
         System.out.println("tempCardPublicKey Encoded length " + tempCardPublicKey.getEncoded().length);
         byte[] messageCode = new byte[]{
@@ -545,7 +559,7 @@ public class Terminal extends Thread {
 
         Util.arrayCopy(messageCode, (short) 0, requestId, (short) 0, (short) 2);
         Util.arrayCopy(publicKeyCardBytes, (short) 0, requestId, (short) 2, (short) 162);
-        Util.arrayCopy(expirationDate, (short) 0, requestId, (short) (2+162), (short) 4);
+        Util.arrayCopy(expirationDate, (short) 0, requestId, (short) (2 + 162), (short) 4);
 
         System.out.println(DatatypeConverter.printHexBinary(requestId));
         byte[] requestIdResponse = backend.sendAndReceive(requestId); //Returns the Id
@@ -554,14 +568,14 @@ public class Terminal extends Thread {
 
         //Receive id of the card
         byte[] id = new byte[]{
-            requestIdResponse[0],
-            requestIdResponse[1],
+                requestIdResponse[0],
+                requestIdResponse[1],
         };
 
         byte[] dataToSend = new byte[10];//container of data that will be sent to the card
 
-        Util.arrayCopy(id, (short)0, dataToSend, (short)0, (short)2); //copy card id to container
-        Util.arrayCopy(personalizedDate, (short)0, dataToSend, (short) 2, (short) 4);//copy date to container
+        Util.arrayCopy(id, (short) 0, dataToSend, (short) 0, (short) 2); //copy card id to container
+        Util.arrayCopy(personalizedDate, (short) 0, dataToSend, (short) 2, (short) 4);//copy date to container
         Util.arrayCopy(expirationDate, (short) 0, dataToSend, (short) 6, (short) 4); //Copy the expiration date to the container
 
         //send data to the card
@@ -584,7 +598,7 @@ public class Terminal extends Thread {
             capdu = new CommandAPDU(CLASS, PERSONALIZATION_NEW_PIN, (byte) 0, (byte) 0, pin);
             ResponseAPDU responsePrivate = ch.transmit(capdu);
             System.out.println("PERSONALIZATION_NEW_PIN: " + Integer.toHexString(responsePrivate.getSW()));
-            System.out.println("PIN "+ DatatypeConverter.printHexBinary(pin));
+            System.out.println("PIN " + DatatypeConverter.printHexBinary(pin));
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -592,28 +606,29 @@ public class Terminal extends Thread {
 
     /**
      * Decommisions a card
+     *
      * @throws CardException
      */
     private void testDecommissioning() throws CardException {
         System.out.println("-----Test Decommissioning-----");
 
-        byte [] nonceBytes = new byte[2];
+        byte[] nonceBytes = new byte[2];
         secureRandom.nextBytes(nonceBytes);
 
         // This is the signature of the Terminal
         byte[] signedNonce = sign(nonceBytes);
         byte[] nonceSignedNonce = new byte[nonceBytes.length + signedNonce.length];
 
-        System.arraycopy(nonceBytes,0,nonceSignedNonce,0         ,nonceBytes.length);
-        System.arraycopy(signedNonce,0,nonceSignedNonce,nonceBytes.length,signedNonce.length);
+        System.arraycopy(nonceBytes, 0, nonceSignedNonce, 0, nonceBytes.length);
+        System.arraycopy(signedNonce, 0, nonceSignedNonce, nonceBytes.length, signedNonce.length);
 
         CommandAPDU hiAPDU = new CommandAPDU(CLASS, DECOMMISSIONING_HI, 0, 0, nonceSignedNonce, nonceSignedNonce.length);
         ResponseAPDU responseAPDU = ch.transmit(hiAPDU);
         System.out.println("DECOMMISSIONING_HI: " + Integer.toHexString(responseAPDU.getSW()));
-        byte [] dataRec = responseAPDU.getData();
+        byte[] dataRec = responseAPDU.getData();
 
         //Check if received nonce has been incremented
-        if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], dataRec[0], dataRec[1], 1)){
+        if (!isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], dataRec[0], dataRec[1], 1)) {
             System.err.println("Nonce has not been incremeneted");
             return;
         }
@@ -625,7 +640,7 @@ public class Terminal extends Thread {
 
         // Messagecode (3) || Nonce || Card Id || Signed (Nonce || Card Id)
 
-        byte[] dataForBackend = new byte[2+dataRec.length];
+        byte[] dataForBackend = new byte[2 + dataRec.length];
         dataForBackend[0] = 0x00;
         dataForBackend[1] = 0x03;
         Util.arrayCopy(dataRec, (short) 0, dataForBackend, (short) 2, (short) dataRec.length);
@@ -639,7 +654,7 @@ public class Terminal extends Thread {
         Util.arrayCopy(backendResponse, (short) 0, backendNonceIncremented, (short) 0, (short) 2); //Copy the plaintext nonce of the backend
 
         //Check if nonce has been incremented by 2 from the backend
-        if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], backendNonceIncremented[0], backendNonceIncremented[1], 2)){
+        if (!isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], backendNonceIncremented[0], backendNonceIncremented[1], 2)) {
             System.err.println("Nonce has not been incremented");
             return;
         }
@@ -654,13 +669,14 @@ public class Terminal extends Thread {
 
     /**
      * Test the reloading
+     *
      * @param amount
      * @throws CardException
      */
     public void testReloading(short amount) throws CardException {
         System.out.println("-----Test Reloading-----");
 
-        byte [] nonceBytes = new byte[2];
+        byte[] nonceBytes = new byte[2];
         secureRandom.nextBytes(nonceBytes);
         short firstShort = Util.makeShort(nonceBytes[0], nonceBytes[1]);
 
@@ -668,8 +684,8 @@ public class Terminal extends Thread {
         byte[] signedNonce = sign(nonceBytes);
         byte[] combinedData = new byte[nonceBytes.length + signedNonce.length];
 
-        System.arraycopy(nonceBytes,0,combinedData,0         ,nonceBytes.length);
-        System.arraycopy(signedNonce,0,combinedData,nonceBytes.length,signedNonce.length);
+        System.arraycopy(nonceBytes, 0, combinedData, 0, nonceBytes.length);
+        System.arraycopy(signedNonce, 0, combinedData, nonceBytes.length, signedNonce.length);
 
         System.out.println(firstShort);
         System.out.println("Send in reloading Hi: " + DatatypeConverter.printHexBinary(combinedData));
@@ -677,7 +693,7 @@ public class Terminal extends Thread {
         ResponseAPDU responseAPDU = ch.transmit(hiAPDU);
         System.out.println("RELOADING_HI: " + Integer.toHexString(responseAPDU.getSW()));
 
-        byte [] incrementedNonce = responseAPDU.getData();
+        byte[] incrementedNonce = responseAPDU.getData();
 
         System.out.println("Response reloading Hi: " + DatatypeConverter.printHexBinary(incrementedNonce));
         //Check if nonce is incremented
@@ -705,7 +721,7 @@ public class Terminal extends Thread {
 
         System.out.println("Response " + DatatypeConverter.printHexBinary(backendResponse));
 
-        if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], backendResponse[0], backendResponse[1], 2)){
+        if (!isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], backendResponse[0], backendResponse[1], 2)) {
             System.err.println("Nonce has not been incremented");
             return;
         }
@@ -718,7 +734,7 @@ public class Terminal extends Thread {
         short balance = Util.makeShort(backendResponse[2], backendResponse[3]);
         short newBalance = (short) (balance + amount);
 
-        byte [] dataToSend = new byte[]{
+        byte[] dataToSend = new byte[]{
                 incrementNonce[0],  //Nonce received from backend incremented
                 incrementNonce[1],  //""
                 incrementedNonce[2],    //Card Id
@@ -728,9 +744,9 @@ public class Terminal extends Thread {
         };
 
         byte[] signedBytes = sign(dataToSend);
-        byte [] bytesApdu = new byte[128+6];
-        System.arraycopy(dataToSend,0, bytesApdu,0,6);
-        System.arraycopy(signedBytes,0, bytesApdu,6,128);
+        byte[] bytesApdu = new byte[128 + 6];
+        System.arraycopy(dataToSend, 0, bytesApdu, 0, 6);
+        System.arraycopy(signedBytes, 0, bytesApdu, 6, 128);
 
         System.out.println(DatatypeConverter.printHexBinary(bytesApdu));
         hiAPDU = new CommandAPDU(CLASS, RELOADING_UPDATE, 0, 0, bytesApdu, bytesApdu.length);
@@ -741,12 +757,13 @@ public class Terminal extends Thread {
 
     /**
      * Create a request for the backend indicating to return the balance of a given card
+     *
      * @param amount
      * @param signedCard
      * @return
      */
-    private byte[] getReloadRequest(short amount, byte[] signedCard){
-        byte[] requestForReload = new  byte[6+128+signedCard.length];
+    private byte[] getReloadRequest(short amount, byte[] signedCard) {
+        byte[] requestForReload = new byte[6 + 128 + signedCard.length];
 
         requestForReload[0] = 0x00;
         requestForReload[1] = 0x04;
@@ -757,17 +774,18 @@ public class Terminal extends Thread {
         byte[] amountSigned = sign(new byte[]{terminalId[0], terminalId[1], requestForReload[4], requestForReload[5]}); //Sign the terminal Id || Amount
 
         Util.arrayCopy(amountSigned, (short) 0, requestForReload, (short) 6, (short) amountSigned.length);
-        Util.arrayCopy(signedCard, (short) 0, requestForReload, (short) (6+amountSigned.length), (short) signedCard.length);
+        Util.arrayCopy(signedCard, (short) 0, requestForReload, (short) (6 + amountSigned.length), (short) signedCard.length);
         return requestForReload;
     }
 
     /**
      * Encrypt the input byte array with the given RSA public key
+     *
      * @param input
      * @param publickey
      * @return
      */
-    private byte[] encrypt(byte[] input, RSAPublicKey publickey){
+    private byte[] encrypt(byte[] input, RSAPublicKey publickey) {
         Cipher cipher = null;
         try {
             cipher = Cipher.getInstance("RSA");
@@ -781,13 +799,14 @@ public class Terminal extends Thread {
 
     /**
      * Test the crediting of a card
+     *
      * @throws CardException
      */
     private void testCrediting() throws CardException {
 
         System.out.println("-----Test Crediting-----");
 
-        byte [] nonceBytes = new byte[2];
+        byte[] nonceBytes = new byte[2];
         secureRandom.nextBytes(nonceBytes);
         short firstShort = Util.makeShort(nonceBytes[0], nonceBytes[1]);
 
@@ -795,20 +814,20 @@ public class Terminal extends Thread {
         byte[] signedNonce = sign(nonceBytes);
         byte[] combinedData = new byte[nonceBytes.length + signedNonce.length];
 
-        System.arraycopy(nonceBytes,0,combinedData,0         ,nonceBytes.length);
-        System.arraycopy(signedNonce,0,combinedData,nonceBytes.length,signedNonce.length);
+        System.arraycopy(nonceBytes, 0, combinedData, 0, nonceBytes.length);
+        System.arraycopy(signedNonce, 0, combinedData, nonceBytes.length, signedNonce.length);
 
         System.out.println("T->C: Credit Hi " + DatatypeConverter.printHexBinary(combinedData));
 
         CommandAPDU hiAPDU = new CommandAPDU(CLASS, CREDIT_HI, 0, 0, combinedData, combinedData.length);
         ResponseAPDU responseAPDU = ch.transmit(hiAPDU);
         System.out.println("CREDIT_HI: " + Integer.toHexString(responseAPDU.getSW()));
-        byte [] incrementedNonce = responseAPDU.getData();
+        byte[] incrementedNonce = responseAPDU.getData();
 
         System.out.println("C->T: Credit Hi " + DatatypeConverter.printHexBinary(incrementedNonce));
 
         //Verify nonce incremented
-        if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], incrementedNonce[0], incrementedNonce[1], 1)){
+        if (!isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], incrementedNonce[0], incrementedNonce[1], 1)) {
             System.err.println("Nonce has not been incremented");
             return;
         }
@@ -830,7 +849,7 @@ public class Terminal extends Thread {
         //Todo make credit amount non-fixed
         short creditAmount = 88;
 
-        if(receivedBalance-creditAmount< 0){
+        if (receivedBalance - creditAmount < 0) {
             System.out.println("Error negative balance");
             return;
         }
@@ -842,14 +861,14 @@ public class Terminal extends Thread {
         byte[] dataToSend = null;
         byte instruction;
 
-        if(creditAmount>20){
+        if (creditAmount > 20) {
             Scanner scanner = new Scanner(System.in);
             byte[] pinArray = new byte[4];
             System.out.println("Enter your PIN:");
             String pin = scanner.next();
 
-            for (int i = 0 ; i < pin.length(); i++){
-                pinArray[i] = (byte)  (pin.charAt(i) - 48);
+            for (int i = 0; i < pin.length(); i++) {
+                pinArray[i] = (byte) (pin.charAt(i) - 48);
             }
 
             byte[] pinEncrypted = encrypt(pinArray, publicKeyCard);
@@ -863,14 +882,14 @@ public class Terminal extends Thread {
             Util.arrayCopy(pinEncrypted, (short) 0, dataToSend, (short) 4, (short) pinEncrypted.length);
 
             instruction = CREDIT_COMMIT_PIN;
-        }else{
+        } else {
             instruction = CREDIT_COMMIT_NO_PIN;
 
             byte[] data = new byte[]{
-                nonceBytes[0],
-                nonceBytes[1],
-                (byte) (creditAmount >> 8),
-                (byte) creditAmount
+                    nonceBytes[0],
+                    nonceBytes[1],
+                    (byte) (creditAmount >> 8),
+                    (byte) creditAmount
             };
 
             byte[] dataToSendSigned = sign(data);
@@ -882,7 +901,7 @@ public class Terminal extends Thread {
 
         System.out.println(DatatypeConverter.printHexBinary(dataToSend));
 
-        if (creditAmount > 20){
+        if (creditAmount > 20) {
             //Send in two APDUs, first one has the plaintext of the nonce, amount and encrypted(pin)
             hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, dataToSend, dataToSend.length);
             responseAPDU = ch.transmit(hiAPDU);
@@ -896,19 +915,19 @@ public class Terminal extends Thread {
             responseAPDU = ch.transmit(hiAPDU);
 
             //Todo: Check if the pin is good
-            if (responseAPDU.getSW() == 27013){
+            if (responseAPDU.getSW() == 27013) {
                 //Pin is wrong
                 System.err.println("Wrong pin!");
                 return;
-            }else if (responseAPDU.getSW() == 0x6305){
+            } else if (responseAPDU.getSW() == 0x6305) {
                 //No more pin attempts
                 System.err.println("No more pin attempts");
                 return;
-            }else if (responseAPDU.getSW() == 0x6301){
+            } else if (responseAPDU.getSW() == 0x6301) {
                 System.err.println("PIN is required");
                 return;
             }
-        }else{
+        } else {
             System.out.println("No pin data to card " + DatatypeConverter.printHexBinary(dataToSend));
             hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, dataToSend, dataToSend.length);
             responseAPDU = ch.transmit(hiAPDU);
@@ -922,9 +941,8 @@ public class Terminal extends Thread {
         byte[] cardPayCommitment = responseAPDU.getData();
 
 
-
         //Verify the incrementation
-        if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], cardPayCommitment[0], cardPayCommitment[1], 1)){
+        if (!isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], cardPayCommitment[0], cardPayCommitment[1], 1)) {
             System.err.println("Nonce has not been incremented");
             return;
         }
@@ -940,7 +958,7 @@ public class Terminal extends Thread {
         // Messagecode (0x00, 0x05) || Nonce || CardId || Amount || Signature (nonce || cardId || amount)
 
         //Receive the final message
-        byte[] dataForBackend = new byte[2+cardPayCommitment.length];
+        byte[] dataForBackend = new byte[2 + cardPayCommitment.length];
         dataForBackend[0] = 0x00;
         dataForBackend[1] = 0x05;
         Util.arrayCopy(cardPayCommitment, (short) 0, dataForBackend, (short) 2, (short) cardPayCommitment.length);
@@ -950,7 +968,7 @@ public class Terminal extends Thread {
         System.out.println(DatatypeConverter.printHexBinary(backendResponse));
 
         //Verify nonce incremented
-        if (! isNonceIncrementedBy(cardPayCommitment[0], cardPayCommitment[1], backendResponse[0], backendResponse[1], 1)){
+        if (!isNonceIncrementedBy(cardPayCommitment[0], cardPayCommitment[1], backendResponse[0], backendResponse[1], 1)) {
             System.err.println("Nonce has not been incremented");
             return;
         }
@@ -960,7 +978,6 @@ public class Terminal extends Thread {
 
         System.out.println("Crediting completed");
     }
-
 
     /**
      * Gets an unsigned byte array representation of <code>big</code>. A leading
@@ -978,13 +995,6 @@ public class Terminal extends Thread {
         }
         return data;
     }
-
-    public static void main(String[] args) {
-        Terminal terminal = new Terminal(new BackEndCommunicator());
-        //new Thread(Terminal).run();
-    }
-
-
 
 
 }

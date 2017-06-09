@@ -1,18 +1,28 @@
 package ePurse;
 
 import javacard.framework.*;
-import javacard.security.*;
+import javacard.security.KeyBuilder;
+import javacard.security.RSAPrivateKey;
+import javacard.security.RSAPublicKey;
+import javacard.security.Signature;
 import javacardx.crypto.Cipher;
 
-import javax.print.attribute.standard.MediaSize;
 import javax.xml.bind.DatatypeConverter;
-import java.io.IOError;
 
 /**
  * @noinspection ClassNamePrefixedWithPackageName, ImplicitCallToSuper, MethodOverridesStaticMethodOfSuperclass, ResultOfObjectAllocationIgnored
  */
 public class Epurse extends Applet implements ISO7816 {
 
+    final static short SW_VERIFICATION_FAILED = 0x6300;
+    final static short SW_PIN_VERIFICATION_REQUIRED = 0x6301;
+    final static short SW_TERMINAL_VERIFICATION_FAILED = 0x6302;
+    final static short SW_CARD_BLOCKED = 0x6303;
+    /**
+     * wrong terminal nonce
+     */
+    final static short SW_WRONG_NONCE = 0x6304;
+    final static short SW_NO_MORE_PIN_ATTEMPTS = 0x6305;
     /**
      * Instruction bytes
      */
@@ -21,44 +31,22 @@ public class Epurse extends Applet implements ISO7816 {
     private final static byte PERSONALIZATION_HI = (byte) 0x30;
     private final static byte PERSONALIZATION_DATES = (byte) 0x31;
     private final static byte PERSONALIZATION_NEW_PIN = (byte) 0x32;
-
     private final static byte DECOMMISSIONING_HI = (byte) 0x33;
     private final static byte DECOMMISSIONING_CLEAR = (byte) 0x34;
-
     private final static byte RELOADING_HI = (byte) 0x35;
     private final static byte RELOADING_UPDATE = (byte) 0x36;
-
     private final static byte CREDIT_HI = (byte) 0x37;
     private final static byte CREDIT_COMMIT_PIN = (byte) 0x38;
     private final static byte CREDIT_COMMIT_NO_PIN = (byte) 0x39;
     private final static byte CREDIT_NEW_BALANCE = (byte) 0x40;
-
     private final static byte VERIFICATION_HI = (byte) 0x41;
     private final static byte VERIFICATION_V = (byte) 0x42;
     private final static byte VERIFICATION_S = (byte) 0x47;
-
     private final static byte KEYPAIR_PRIVATE = (byte) 0x43;
     private final static byte KEYPAIR_PRIVATE_RSA = (byte) 0x45;
-
     private final static byte DECRYPTION_KEY = (byte) 0x44;
-
-
     private final static byte SELECT = (byte) 0xA4;
-
     private final static short UNKNOWN_INSTRUCTION_ERROR = (short) 1;
-
-    final static short SW_VERIFICATION_FAILED = 0x6300;
-
-    final static short SW_PIN_VERIFICATION_REQUIRED = 0x6301;
-
-    final static short SW_TERMINAL_VERIFICATION_FAILED = 0x6302;
-
-    final static short SW_CARD_BLOCKED = 0x6303;
-
-    /** wrong terminal nonce */
-    final static short SW_WRONG_NONCE = 0x6304;
-    final static short SW_NO_MORE_PIN_ATTEMPTS = 0x6305;
-
     /**
      * State bytes
      */
@@ -72,14 +60,28 @@ public class Epurse extends Applet implements ISO7816 {
      */
     private final static byte TERMINAL_NO_AUTH = 0;
     private final static byte TERMINAL_AUTH = 1;
-
-
+    private final static byte PIN_LENGTH = (byte) 4;
+    private final static byte ID_LENGTH = (byte) 2;
+    private final static byte NONCE_LENGTH = (byte) 2;
+    private final static byte AMOUNT_LENGTH = (byte) 2;
+    private final static byte DATE_LENGTH = (byte) 8;
+    private final static short MODULUS_LENGTH = 129;
+    private final static short PRIVATE_EXPONENT_LENGTH = 128;
+    private final static byte PUBLIC_EXPONENT_LENGTH = 3;
+    Cipher cipher;
+    /**
+     * Ram volatile variables
+     */
+    byte[] lastNonce;
+    /**
+     * The communication state (auth or not)
+     */
+    byte[] sessionStatus;
     /**
      * Transient buffer
      */
     private byte[] transientBuffer;
     private byte[] headerBuffer;
-
     /**
      * Cryptographic primitives
      */
@@ -90,22 +92,10 @@ public class Epurse extends Applet implements ISO7816 {
     private RSAPrivateKey privKey;
     private RSAPublicKey backEndKey;
     private RSAPublicKey terminalKey;
-    Cipher cipher;
-
     /**
      * PIN primitives
      */
     private OwnerPIN pin;
-    private final static byte PIN_LENGTH = (byte) 4;
-    private final static byte ID_LENGTH = (byte) 2;
-    private final static byte NONCE_LENGTH = (byte) 2;
-    private final static byte AMOUNT_LENGTH = (byte) 2;
-    private final static byte DATE_LENGTH = (byte) 8;
-    private final static short MODULUS_LENGTH = 129;
-    private final static short PRIVATE_EXPONENT_LENGTH = 128;
-    private final static byte PUBLIC_EXPONENT_LENGTH = 3;
-
-
     /**
      * Eprom persisten variables
      */
@@ -113,25 +103,12 @@ public class Epurse extends Applet implements ISO7816 {
     private byte[] date = new byte[4];
     private byte[] expirationDate = new byte[4];
     private byte[] balance = new byte[2];
-
     /**
      * The applet state (RAW, PERSONALIZED or DECOMMISSIONED).
      */
     private byte status;
-
     private byte[] isPinChecked;
-
-
-    /**
-     * Ram volatile variables
-     */
-    byte[] lastNonce;
     private byte[] amount; //= new byte[2];
-
-    /**
-     * The communication state (auth or not)
-     */
-    byte[] sessionStatus;
 
     /**
      * Constructor
@@ -141,8 +118,8 @@ public class Epurse extends Applet implements ISO7816 {
         transientBuffer = JCSystem.makeTransientByteArray((short) 256, JCSystem.CLEAR_ON_RESET);
         headerBuffer = JCSystem.makeTransientByteArray((short) 5, JCSystem.CLEAR_ON_RESET);
         sessionStatus = JCSystem.makeTransientByteArray((short) 1, JCSystem.CLEAR_ON_RESET);
-        lastNonce = JCSystem.makeTransientByteArray((short)2,JCSystem.CLEAR_ON_RESET);
-        amount = JCSystem.makeTransientByteArray((short)2,JCSystem.CLEAR_ON_RESET);
+        lastNonce = JCSystem.makeTransientByteArray((short) 2, JCSystem.CLEAR_ON_RESET);
+        amount = JCSystem.makeTransientByteArray((short) 2, JCSystem.CLEAR_ON_RESET);
         isPinChecked = JCSystem.makeTransientByteArray((short) 1, JCSystem.CLEAR_ON_RESET);
 
         pubKey = (RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC, KeyBuilder.LENGTH_RSA_1024, false);
@@ -171,7 +148,7 @@ public class Epurse extends Applet implements ISO7816 {
 
     public boolean select() {
         // Check whether there still some pin tries (max 3)
-        if(pin.getTriesRemaining()>0) return true;
+        if (pin.getTriesRemaining() > 0) return true;
         else return false;
     }
 
@@ -214,7 +191,7 @@ public class Epurse extends Applet implements ISO7816 {
         short lastNumber = Util.makeShort(lastNonce[0], lastNonce[1]);
         short number = Util.makeShort(msb, lsb);
 
-        if((short)(lastNumber+increment) != number) ISOException.throwIt(SW_WRONG_NONCE);
+        if ((short) (lastNumber + increment) != number) ISOException.throwIt(SW_WRONG_NONCE);
 
         number += 1;
         transientBuffer[offset] = (byte) (number >> 8);
@@ -289,7 +266,7 @@ public class Epurse extends Applet implements ISO7816 {
                     status = STATE_PERSONALIZED;
                     break;
                 default:
-                    throw new ISOException( SW_INS_NOT_SUPPORTED);
+                    throw new ISOException(SW_INS_NOT_SUPPORTED);
             }
 
         } else if (status == STATE_PERSONALIZED) {
@@ -307,7 +284,7 @@ public class Epurse extends Applet implements ISO7816 {
                     case VERIFICATION_S:
                         processVerificationSignature(apdu);
                         // Safe state term verified
-                        sessionStatus[0]=TERMINAL_AUTH;
+                        sessionStatus[0] = TERMINAL_AUTH;
                         break;
                     default:
                         throw new ISOException(SW_INS_NOT_SUPPORTED);
@@ -326,7 +303,7 @@ public class Epurse extends Applet implements ISO7816 {
                         processDecommissioningClear(apdu);
                         break;
 
-                        //Reloading APDUs:
+                    //Reloading APDUs:
                     case RELOADING_HI:
                         sendHiMessage(apdu);
                         break;
@@ -334,7 +311,7 @@ public class Epurse extends Applet implements ISO7816 {
                         processReloadingUpdate(apdu);
                         break;
 
-                        //Crediting APDUs:
+                    //Crediting APDUs:
                     case CREDIT_HI:
                         sendHiMessage(apdu);
                         break;
@@ -345,21 +322,19 @@ public class Epurse extends Applet implements ISO7816 {
                         processCommitPayment(apdu);
                         break;
                     default:
-                        throw new ISOException( SW_INS_NOT_SUPPORTED);
+                        throw new ISOException(SW_INS_NOT_SUPPORTED);
                 }
 
-            }else ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+            } else ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
-        }else ISOException.throwIt(SW_CARD_BLOCKED);
+        } else ISOException.throwIt(SW_CARD_BLOCKED);
     }
-
-
 
 
     private void processVerificationHi(APDU apdu) {
         //Increment the received number
         short datalength = (short) headerBuffer[OFFSET_LC];
-        readBuffer(apdu,transientBuffer,(short)0,datalength);
+        readBuffer(apdu, transientBuffer, (short) 0, datalength);
 
         incrementNumberAndStore(transientBuffer[0], transientBuffer[1], (short) 0);
 
@@ -389,7 +364,7 @@ public class Epurse extends Applet implements ISO7816 {
         short modulusLength = (short) (headerBuffer[OFFSET_P2] & 0x00FF);
 
         terminalKey.setExponent(transientBuffer, (short) 2, exponentLength);
-        terminalKey.setModulus(transientBuffer, (short) (2+exponentLength), modulusLength);
+        terminalKey.setModulus(transientBuffer, (short) (2 + exponentLength), modulusLength);
 
         lastNonce[0] = transientBuffer[0];
         lastNonce[1] = transientBuffer[1];
@@ -406,12 +381,12 @@ public class Epurse extends Applet implements ISO7816 {
         readBuffer(apdu, transientBuffer, (short) 0, datalength);
 
         // Get teminal key data stored
-        byte[] bytesTermKeyStored = new byte[(MODULUS_LENGTH + PUBLIC_EXPONENT_LENGTH)*2+2];
+        byte[] bytesTermKeyStored = new byte[(MODULUS_LENGTH + PUBLIC_EXPONENT_LENGTH) * 2 + 2];
         Util.arrayCopy(lastNonce, (short) 0, bytesTermKeyStored, (short) 0, (short) 2);
         pubKey.getExponent(bytesTermKeyStored, (short) (NONCE_LENGTH));
-        pubKey.getModulus(bytesTermKeyStored, (short) (NONCE_LENGTH+PUBLIC_EXPONENT_LENGTH));
-        terminalKey.getExponent(bytesTermKeyStored,((short)(NONCE_LENGTH+PUBLIC_EXPONENT_LENGTH+MODULUS_LENGTH)));
-        terminalKey.getModulus(bytesTermKeyStored, ((short) (NONCE_LENGTH+PUBLIC_EXPONENT_LENGTH*2+MODULUS_LENGTH)));
+        pubKey.getModulus(bytesTermKeyStored, (short) (NONCE_LENGTH + PUBLIC_EXPONENT_LENGTH));
+        terminalKey.getExponent(bytesTermKeyStored, ((short) (NONCE_LENGTH + PUBLIC_EXPONENT_LENGTH + MODULUS_LENGTH)));
+        terminalKey.getModulus(bytesTermKeyStored, ((short) (NONCE_LENGTH + PUBLIC_EXPONENT_LENGTH * 2 + MODULUS_LENGTH)));
 
         //Todo: we wanted to add a signature check but only in this case we assume that the terminal signature verification satisfies
 
@@ -426,14 +401,15 @@ public class Epurse extends Applet implements ISO7816 {
 //
 //        // FIXME: 6f00 in the next line ...
         System.out.println("@Card signature check " + DatatypeConverter.printHexBinary(bytesTermKeyStored));
-         boolean isVerified = verify(bytesTermKeyStored, (short) 0, ((short) bytesTermKeyStored.length), transientBuffer, (short) 0, (short) 128, backEndKey);
-         if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);
+        boolean isVerified = verify(bytesTermKeyStored, (short) 0, ((short) bytesTermKeyStored.length), transientBuffer, (short) 0, (short) 128, backEndKey);
+        if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);
 
         incrementNumberAndStore(lastNonce[0], lastNonce[1], (short) 0);
     }
 
     /**
      * Store the public key of the Backend within the personalization phase
+     *
      * @param apdu
      */
     private void saveBackendKey(APDU apdu) {
@@ -456,7 +432,7 @@ public class Epurse extends Applet implements ISO7816 {
     private void sendHiMessage(APDU apdu) {
         //Increment the received number
         short datalength = (short) (headerBuffer[OFFSET_LC] & 0x00FF);
-        readBuffer(apdu,transientBuffer,(short)0,datalength);
+        readBuffer(apdu, transientBuffer, (short) 0, datalength);
 
         // Verify with received sign
         boolean isVerified = verify(transientBuffer, (short) 0, (short) 2, transientBuffer, (short) 2, (short) 128, terminalKey);
@@ -522,9 +498,9 @@ public class Epurse extends Applet implements ISO7816 {
 
     }
 
-    private void processCommitPaymentPIN(APDU apdu){
-        readBuffer(apdu, transientBuffer, (short)0,(short) (headerBuffer[OFFSET_LC] & 0x00FF) );
-        if(headerBuffer[ISO7816.OFFSET_P1]==0) {
+    private void processCommitPaymentPIN(APDU apdu) {
+        readBuffer(apdu, transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
+        if (headerBuffer[ISO7816.OFFSET_P1] == 0) {
             // Verify nonce, increment and save it to send in the second apdu
             lastNonce[0] = transientBuffer[0];
             lastNonce[1] = transientBuffer[1];
@@ -538,7 +514,7 @@ public class Epurse extends Applet implements ISO7816 {
             cipher.doFinal(transientBuffer, (short) 4, (short) 128, pinBytes, (short) 0);
 
             // Verify pin, first check if there remain any tries
-            if (pin.getTriesRemaining() <= 0x00){
+            if (pin.getTriesRemaining() <= 0x00) {
                 ISOException.throwIt(SW_NO_MORE_PIN_ATTEMPTS);
             }
 
@@ -550,26 +526,26 @@ public class Epurse extends Applet implements ISO7816 {
             //Get new balance and amount
             Util.arrayCopy(transientBuffer, (short) 2, amount, (short) 0, (short) 2);
 
-        }else if (headerBuffer[ISO7816.OFFSET_P1]==1){
+        } else if (headerBuffer[ISO7816.OFFSET_P1] == 1) {
             //Adding the if pin validated check yielded an error
-            if (isPinChecked[0] == 0x56){
+            if (isPinChecked[0] == 0x56) {
                 pay(apdu);
-            }else{
+            } else {
                 ISOException.throwIt(SW_PIN_VERIFICATION_REQUIRED);
             }
 
 
-        }else ISOException.throwIt(SW_COMMAND_NOT_ALLOWED);
+        } else ISOException.throwIt(SW_COMMAND_NOT_ALLOWED);
 
     }
 
-    private void processCommitPayment(APDU apdu){
-        readBuffer(apdu, transientBuffer, (short)0,(short) (headerBuffer[OFFSET_LC] & 0x00FF) );
+    private void processCommitPayment(APDU apdu) {
+        readBuffer(apdu, transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
         byte[] payload = new byte[4];
 
         // Check nonce is incremented +2
 //        ISOException.throwIt(Util.makeShort(transientBuffer[0], transientBuffer[1]));
-        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short)0, (short)2);
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short) 2);
 
         // Get amount
         Util.arrayCopy(transientBuffer, (short) 2, amount, (short) 0, (short) 2);
@@ -577,7 +553,7 @@ public class Epurse extends Applet implements ISO7816 {
         // Check we have enough balance
         short sBalance = Util.makeShort(balance[0], balance[1]);
         short sAmount = Util.makeShort(amount[0], amount[1]);
-        if((short) (sBalance-sAmount) < (short) 0) ISOException.throwIt(SW_DATA_INVALID);
+        if ((short) (sBalance - sAmount) < (short) 0) ISOException.throwIt(SW_DATA_INVALID);
 
         // Copi nonde id and amount to sing
         //Util.arrayCopy(lastNonce, (short) 0, transientBuffer, (short) 0, (short) 2);
@@ -595,7 +571,7 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
     // Commit the payment, done after verify the pin (CREDIT_COMMIT_PIN) or pay without pin (CREDIT_COMMIT_NO_PIN)
-    private void pay(APDU apdu){
+    private void pay(APDU apdu) {
 
         //Util.arrayCopy(transientBuffer, (short) 2, amount, (short) 0, (short) 2);
         // in the second apdu we receive the nonec amount balance signed
@@ -606,13 +582,13 @@ public class Epurse extends Applet implements ISO7816 {
         //Util.arrayCopy(balance, (short) 0, payload, (short) 4, (short) 2);
         //datalength = (short) (datalength + 2);
 
-        boolean payloadVerified = verify(payload, (short) 0, (short) 4, transientBuffer,(short) 0, (short) 128, terminalKey );
+        boolean payloadVerified = verify(payload, (short) 0, (short) 4, transientBuffer, (short) 0, (short) 128, terminalKey);
         if (!payloadVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
         incrementNumberAndStore(lastNonce[0], lastNonce[1], (short) 0);
         short sBalance = Util.makeShort(balance[0], balance[1]);
         short sAmount = Util.makeShort(amount[0], amount[1]);
-        if((short) (sBalance-sAmount) < (short) 0) ISOException.throwIt(SW_DATA_INVALID);
+        if ((short) (sBalance - sAmount) < (short) 0) ISOException.throwIt(SW_DATA_INVALID);
 
         // Copi nonde id and amount to sing
         Util.arrayCopy(lastNonce, (short) 0, transientBuffer, (short) 0, (short) 2);
@@ -642,10 +618,11 @@ public class Epurse extends Applet implements ISO7816 {
         if (!isVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
         // Verify id
-        if (Util.arrayCompare(id, (short) 0, transientBuffer, (short) 2, (short) 2) != 0x00) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+        if (Util.arrayCompare(id, (short) 0, transientBuffer, (short) 2, (short) 2) != 0x00)
+            ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
         // Verify nonce
-        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)1);
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short) 1);
 
         // We sing wit offset 2 to prevent the overridign of the nonce
         short signedResponseLength = sign(transientBuffer, (short) 0, (short) 2, transientBuffer, (short) 2);
@@ -676,14 +653,15 @@ public class Epurse extends Applet implements ISO7816 {
         // If signature verification not verified throw exception
         if (!isVerified) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
-        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)2);
+        incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short) 2);
 
         // Verify id
-        if (Util.arrayCompare(id, (short) 0, transientBuffer, (short) 2, (short) 2) != 0x00) ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
+        if (Util.arrayCompare(id, (short) 0, transientBuffer, (short) 2, (short) 2) != 0x00)
+            ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
 
         // Store new amount
-        Util.arrayCopy(transientBuffer, (short) (NONCE_LENGTH+ID_LENGTH), balance, (short)0, AMOUNT_LENGTH);
+        Util.arrayCopy(transientBuffer, (short) (NONCE_LENGTH + ID_LENGTH), balance, (short) 0, AMOUNT_LENGTH);
     }
 
 
@@ -709,7 +687,7 @@ public class Epurse extends Applet implements ISO7816 {
         }
     }
 
-    public void deselect(){
+    public void deselect() {
         pin.reset();
     }
 
