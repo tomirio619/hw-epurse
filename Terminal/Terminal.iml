@@ -9,5 +9,15 @@
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="module" module-name="IntelliJ-IDEA-Java-Card-Project ePurse" />
     <orderEntry type="module" module-name="Backend" />
+    <orderEntry type="module-library">
+      <library>
+        <CLASSES>
+          <root url="file://$MODULE_DIR$/../util" />
+        </CLASSES>
+        <JAVADOC />
+        <SOURCES />
+        <jarDirectory url="file://$MODULE_DIR$/../util" recursive="false" />
+      </library>
+    </orderEntry>
   </component>
 </module>

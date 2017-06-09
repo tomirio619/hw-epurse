@@ -118,7 +118,7 @@ public class Terminal extends Thread {
 
                             testCrediting();
 //
-//                            testDecommissioning();
+                            testDecommissioning();
 
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -847,7 +847,7 @@ public class Terminal extends Thread {
         //Receive the correct balance from the backend
         short receivedBalance = Util.makeShort(backendResponse[2], backendResponse[3]);
         //Todo make credit amount non-fixed
-        short creditAmount = 88;
+        short creditAmount = 5;
 
         if (receivedBalance - creditAmount < 0) {
             System.out.println("Error negative balance");

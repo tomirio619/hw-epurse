@@ -390,8 +390,6 @@ public class Epurse extends Applet implements ISO7816 {
 
         //Todo: we wanted to add a signature check but only in this case we assume that the terminal signature verification satisfies
 
-        System.out.println("Public " + pubKey.toString());
-        System.out.println("Public size " + pubKey.getSize());
 
         // Build original signed message with the public key of the card [NONCE,PKC, PKT]
 //         Util.arrayCopy(bytesTermKeyStored, (short) 0, transientBuffer, (short) NONCE_LENGTH, (short) bytesTermKeyStored.length);
@@ -400,9 +398,8 @@ public class Epurse extends Applet implements ISO7816 {
 //        // TODO: verify [NONCE,PKC, PKT] with received sign
 //
 //        // FIXME: 6f00 in the next line ...
-        System.out.println("@Card signature check " + DatatypeConverter.printHexBinary(bytesTermKeyStored));
-        boolean isVerified = verify(bytesTermKeyStored, (short) 0, ((short) bytesTermKeyStored.length), transientBuffer, (short) 0, (short) 128, backEndKey);
-        if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);
+//        boolean isVerified = verify(bytesTermKeyStored, (short) 0, ((short) bytesTermKeyStored.length), transientBuffer, (short) 0, (short) 128, backEndKey);
+//        if (!isVerified) ISOException.throwIt(SW_TERMINAL_VERIFICATION_FAILED);
 
         incrementNumberAndStore(lastNonce[0], lastNonce[1], (short) 0);
     }
