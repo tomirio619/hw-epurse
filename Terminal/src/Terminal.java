@@ -7,6 +7,7 @@ import javacard.framework.ISO7816;
 import javacard.framework.Util;
 import org.bouncycastle.jcajce.provider.asymmetric.rsa.BCRSAPublicKey;
 import org.bouncycastle.util.encoders.Hex;
+import org.bouncycastle.util.test.FixedSecureRandom;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
@@ -128,7 +129,7 @@ public class Terminal extends Thread implements IObservable {
                             System.out.println(DatatypeConverter.printHexBinary(selectApplet.getBytes()));
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
 
-//                            personalizationFull();
+                            personalizationFull();
 
                             testTerminalAuth();
 
@@ -895,7 +896,7 @@ public class Terminal extends Thread implements IObservable {
 
             byte[] dataToSendSigned = sign(data);
             dataToSend = new byte[4 + dataToSendSigned.length];
-            Util.arrayCopy(dataToSend, (short) 0, dataToSend, (short) 0, (short) 4);
+            Util.arrayCopy(data, (short) 0, dataToSend, (short) 0, (short) 4);
             Util.arrayCopy(dataToSendSigned, (short) 0, dataToSend, (short) 4, (short) 128);
         }
 
@@ -930,6 +931,7 @@ public class Terminal extends Thread implements IObservable {
             }
         }else{
             //Todo: implement this on the card
+            System.out.println("No pin data to card " + DatatypeConverter.printHexBinary(dataToSend));
             hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, dataToSend, dataToSend.length);
             responseAPDU = ch.transmit(hiAPDU);
         }
@@ -940,6 +942,8 @@ public class Terminal extends Thread implements IObservable {
         //Receive the commitment from the card
 
         byte[] cardPayCommitment = responseAPDU.getData();
+
+
 
         //Verify the incrementation
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], cardPayCommitment[0], cardPayCommitment[1], 1)){

@@ -605,6 +605,7 @@ public class Epurse extends Applet implements ISO7816 {
         byte[] payload = new byte[4];
 
         // Check nonce is incremented +2
+//        ISOException.throwIt(Util.makeShort(transientBuffer[0], transientBuffer[1]));
         incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short)0, (short)2);
 
         // Get amount
