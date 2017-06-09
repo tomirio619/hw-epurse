@@ -333,7 +333,6 @@ public class Epurse extends Applet implements ISO7816 {
                     case DECOMMISSIONING_CLEAR:
                         //TODO check nonces
                         processDecommissioningClear(apdu);
-                        status = STATE_DECOMMISSIONED;
                         break;
 
                         //Reloading APDUs:
@@ -647,6 +646,7 @@ public class Epurse extends Applet implements ISO7816 {
     private void processCommitPayment(APDU apdu){
         //Todo: implement :)
     }
+    
 
     private void processDecommissioningClear(APDU apdu) {
         readBuffer(apdu, transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
@@ -661,6 +661,19 @@ public class Epurse extends Applet implements ISO7816 {
 
         // Verify nonce
         incrementNumberStoreAndCheck(transientBuffer[0], transientBuffer[1], (short) 0, (short)2);
+
+        // We sing wit offset 2 to prevent the overridign of the nonce
+        short signedResponseLength = sign(transientBuffer, (short) 0, (short) 2, transientBuffer, (short) 2);
+
+        // Block the card before send the response
+        status = STATE_DECOMMISSIONED;
+
+        //Send the response
+        apdu.setOutgoing();
+        apdu.setOutgoingLength((short) (2 + signedResponseLength));
+        apdu.sendBytesLong(transientBuffer, (short) 0, (short) (2 + signedResponseLength));
+
+
 
 
     }
