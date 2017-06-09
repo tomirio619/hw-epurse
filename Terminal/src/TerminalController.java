@@ -1,4 +1,5 @@
 import Events.CardConnectedEvent;
+import Events.ErrorEvent;
 import Events.UpdateLogsEvent;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
@@ -30,7 +31,7 @@ public class TerminalController implements Initializable, Observer {
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         System.out.println("Am I first?");
-        terminal = new Terminal();
+        terminal = new Terminal(new BackEndCommunicator());
 
         new Timer().schedule(new TimerTask() {
             @Override
@@ -97,6 +98,13 @@ public class TerminalController implements Initializable, Observer {
 
         if (arg instanceof CardConnectedEvent){
             txtConnection.setText(((CardConnectedEvent) arg).getCardName());
+        }
+
+        if (arg instanceof ErrorEvent){
+            Alert alert = new Alert(Alert.AlertType.ERROR);
+            alert.setHeaderText("Error");
+            alert.setContentText(((ErrorEvent) arg).getErrorMessage());
+            alert.showAndWait();
         }
     }
 }

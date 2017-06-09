@@ -1,5 +1,6 @@
 import Events.IObservable;
 import com.sun.xml.internal.bind.v2.runtime.unmarshaller.ValuePropertyLoader;
+import javacard.framework.APDU;
 import javacard.framework.ISO7816;
 import javacard.framework.Util;
 import org.bouncycastle.jcajce.provider.asymmetric.rsa.BCRSAPublicKey;
@@ -11,6 +12,7 @@ import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 import javax.smartcardio.*;
 import javax.xml.bind.DatatypeConverter;
+import javax.xml.crypto.Data;
 import java.math.BigInteger;
 import java.security.*;
 import java.security.interfaces.RSAKey;
@@ -64,18 +66,20 @@ public class Terminal extends Thread implements IObservable {
 
     private RSAPublicKey publicKeyCard;
 
+    private RSAPublicKey tempCardPublicKey;
+
     private BackEndCommunicator backend;
     private CardChannel ch = null;
 
     private List<Observer> observers;
 
 
-    public Terminal() {
+    public Terminal(BackEndCommunicator be) {
         Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
         loadBackendKeys();
         loadTerminalKeys();
         secureRandom = new SecureRandom();
-        backend = new BackEndCommunicator();
+        this.backend = be;
 
         this.start();
     }
@@ -123,32 +127,14 @@ public class Terminal extends Thread implements IObservable {
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
 
                             personalizationFull();
-                            publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
-
-                            //Todo: fix the hardcoded key
-//                            RSAPublicKey loadedPublicKey =  loadCardKeys();
 
                             testTerminalAuth();
-//
-//                            byte[] data = new byte[]{0x42};
-//                            byte[] signed = sign(privateKeyCard, data);
-//                            byte[] dataAndSigned = new byte[1+128];
-//                            Util.arrayCopy(data, (short) 0, dataAndSigned, (short) 0 , (short) 1);
-//                            Util.arrayCopy(signed, (short) 0, dataAndSigned, (short) 1, (short) 128);
-//                            handleSignature(loadedPublicKey, 1, dataAndSigned);
-//
-//                            signed = sign(privateKeyCard, data);
-//                            dataAndSigned = new byte[1+128];
-//                            Util.arrayCopy(data, (short) 0, dataAndSigned, (short) 0 , (short) 1);
-//                            Util.arrayCopy(signed, (short) 0, dataAndSigned, (short) 1, (short) 128);
-//                            handleSignature(publicKeyCard, 1, dataAndSigned);
 
                             testReloading();
 
                             testCrediting();
 
-                            //Todo: finish decommissioning
-                            //testDecommissioning(ch);
+//                            testDecommissioning();
 
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -329,7 +315,6 @@ public class Terminal extends Thread implements IObservable {
         Signature signature = null;
         try {
             signature = Signature.getInstance("SHA1withRSA", "BC");
-            System.out.println(DatatypeConverter.printHexBinary(publicKey.getEncoded()));
             signature.initVerify(publicKey);
             signature.update(plainText);
             return signature.verify(signedBytes, 0, signedBytes.length);
@@ -386,7 +371,6 @@ public class Terminal extends Thread implements IObservable {
 
         byte [] ca = responseAPDU.getData(); // Data Ca{Ca}SKC
 
-
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], ca[0], ca[1], 1)){
             System.err.println("Nonce not incremented");
         }
@@ -432,6 +416,8 @@ public class Terminal extends Thread implements IObservable {
         byte[] vSignature = new byte[signatureSize]; //Buffer for signature
         Util.arrayCopy(v, (short) (vPlaintext.length), vSignature, (short) 0, signatureSize);
 
+        System.out.println("Card ID : " + Util.makeShort(ca[2], ca[3]));
+
         System.out.println(DatatypeConverter.printHexBinary(vPlaintext));
 
         if (!verify(publicKeyBackend, vPlaintext, vSignature)) {
@@ -443,13 +429,14 @@ public class Terminal extends Thread implements IObservable {
         byte[] publicKeyCardBytes = new byte[encodedSize];
         Util.arrayCopy(vPlaintext, (short) 2, publicKeyCardBytes, (short) 0, encodedSize);
 
+        System.out.println("Encoded public key bytes from DB " + DatatypeConverter.printHexBinary(publicKeyCardBytes));
+
         byte[] publicKeyTerminalBytes = new byte[exponentSize + modulusSize];
         Util.arrayCopy(vPlaintext, (short) (2+encodedSize), publicKeyTerminalBytes, (short) 0, (short) (exponentSize+modulusSize));
 
         byte[] modulusBytes = new byte[modulusSize];
         byte[] exponentBytes = new byte[exponentSize];
 
-        //Todo: look at whether this is correct. Only works if the RSA public key that has been received was send using the getEncoded() function
         Util.arrayCopy(publicKeyCardBytes, (short) 0, exponentBytes, (short) 0, exponentSize);
         Util.arrayCopy(publicKeyCardBytes, exponentSize, modulusBytes, (short) 0, modulusSize);
 
@@ -457,7 +444,7 @@ public class Terminal extends Thread implements IObservable {
         BigInteger exponent = new BigInteger(exponentBytes);
 
         // Create private and public key specs
-        publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
+        publicKeyCard = (RSAPublicKey) keyFromEncoded(publicKeyCardBytes, 0);
 
         //Send to card
         CommandAPDU capdu;
@@ -490,56 +477,70 @@ public class Terminal extends Thread implements IObservable {
         Util.arrayCopy(modulusBytesBE,(short)0,bytesKeyBE,(short)exponentBytesBE.length,(short)modulusBytesBE.length);
         CommandAPDU capdu;
         //Changed to PERSONALIZATION_BACKEND_KEY 0x20
-        capdu = new CommandAPDU(CLASS, PERSONALIZATION_BACKEND_KEY, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyBE);
+
+        System.out.println("Backend Key Bytes " + DatatypeConverter.printHexBinary(bytesKeyBE));
+
+        capdu = new CommandAPDU(CLASS, PERSONALIZATION_BACKEND_KEY, (byte) exponentBytesBE.length, (byte) modulusBytesBE.length, bytesKeyBE, bytesKeyBE.length);
         ResponseAPDU responsePrivate = ch.transmit(capdu);
         System.out.println("BACKEND_KEY: " + Integer.toHexString(responsePrivate.getSW()));
 
     }
 
     public void testPersonalizationHi() throws CardException, NoSuchAlgorithmException {
+        //generate fresh card keys
 
-        //Get keys from CardKeys.java (keys stored in the database)
-        RSAPrivateKey cardPrivateKey = null;
-        BigInteger modulusBig = new BigInteger(CardKeys.modulus, 16);
-        BigInteger exponentBig = new BigInteger(CardKeys.privateExponent, 16);
-        // Create private  key specs
-        RSAPrivateKeySpec privateKeySpec = new RSAPrivateKeySpec(modulusBig, exponentBig);
-        // Create a key factory
-        KeyFactory factory = null;
-        try {
-            factory = KeyFactory.getInstance("RSA");
-            // Create the RSA private and public keys
-            cardPrivateKey = (RSAPrivateKey) factory.generatePrivate(privateKeySpec);
-        } catch (InvalidKeySpecException | NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        }
+//        //Get keys from CardKeys.java (keys stored in the database)
+//        RSAPrivateKey cardPrivateKey = null;
+//        BigInteger modulusBig = new BigInteger(CardKeys.modulus, 16);
+//        BigInteger exponentBig = new BigInteger(CardKeys.privateExponent, 16);
+//        // Create private  key specs
+//        RSAPrivateKeySpec privateKeySpec = new RSAPrivateKeySpec(modulusBig, exponentBig);
+//        // Create a key factory
+//        KeyFactory factory = null;
+//        try {
+//            factory = KeyFactory.getInstance("RSA");
+//            // Create the RSA private and public keys
+//            cardPrivateKey = (RSAPrivateKey) factory.generatePrivate(privateKeySpec);
+//        } catch (InvalidKeySpecException | NoSuchAlgorithmException e) {
+//            e.printStackTrace();
+//        }
+//
+//        publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
+//
+//        x
+        System.out.println("Generating fresh keys");
+        KeyPairGenerator generator = null;
 
-        publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
+        generator = KeyPairGenerator.getInstance("RSA");
 
-        //byte [] nonceBytes = new byte[2];
-        //secureRandom.nextBytes(nonceBytes);
+        byte[] seed = new SecureRandom().generateSeed(20);
 
-        byte[] modulus = getBytes(cardPrivateKey.getModulus());
+        generator.initialize(1024, new SecureRandom(seed));
+        KeyPair pair = generator.generateKeyPair();
+        tempCardPublicKey = (RSAPublicKey) pair.getPublic();
+        privateKeyCard = (RSAPrivateKey) pair.getPrivate();
+
         // Sending modulus private key
         CommandAPDU capdu;
+        byte[] modulus = getBytes(privateKeyCard.getModulus());
         capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 0, (byte) 0, modulus);
         ResponseAPDU responsePrivate = ch.transmit(capdu);
         System.out.println("PERSONALIZATION_HI private modulus: " + Integer.toHexString(responsePrivate.getSW()));
 
         // Sending exponent private key
-        byte[] exponent = getBytes(cardPrivateKey.getPrivateExponent());
+        byte[] exponent = getBytes(privateKeyCard.getPrivateExponent());
         capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 1, (byte) 0, exponent);
         responsePrivate = ch.transmit(capdu);
         System.out.println("PERSONALIZATION_HI private exponent: " + Integer.toHexString(responsePrivate.getSW()));
 
-        System.out.println("Public key" + DatatypeConverter.printHexBinary(publicKeyCard.getEncoded()));
+        System.out.println("Public key" + DatatypeConverter.printHexBinary(tempCardPublicKey.getEncoded()));
 
-        modulus = getBytes(publicKeyCard.getModulus());
+        modulus = getBytes(tempCardPublicKey.getModulus());
         capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 2, (byte) 0, modulus);
         responsePrivate = ch.transmit(capdu);
         System.out.println("PERSONALIZATION_HI public modulus: " + Integer.toHexString(responsePrivate.getSW()));
 
-        exponent = getBytes(publicKeyCard.getPublicExponent());
+        exponent = getBytes(tempCardPublicKey.getPublicExponent());
         capdu = new CommandAPDU(CLASS, PERSONALIZATION_HI, (byte) 3, (byte) 0, exponent);
         responsePrivate = ch.transmit(capdu);
         System.out.println("PERSONALIZATION_HI public exponent: " + Integer.toHexString(responsePrivate.getSW()));
@@ -567,7 +568,8 @@ public class Terminal extends Thread implements IObservable {
         };
 
         byte[] requestId = new byte[162+6];
-        byte[] publicKeyCardBytes = publicKeyCard.getEncoded();
+        byte[] publicKeyCardBytes = tempCardPublicKey.getEncoded();
+        System.out.println("tempCardPublicKey Encoded length " + tempCardPublicKey.getEncoded().length);
         byte[] messageCode = new byte[]{
                 0x00,
                 0x02,
@@ -580,12 +582,12 @@ public class Terminal extends Thread implements IObservable {
         System.out.println(DatatypeConverter.printHexBinary(requestId));
         byte[] requestIdResponse = backend.sendAndReceive(requestId); //Returns the Id
 
-        System.out.println(DatatypeConverter.printHexBinary(requestIdResponse));
+        System.out.println("Card Id for the card " + DatatypeConverter.printHexBinary(requestIdResponse));
 
         //Receive id of the card
         byte[] id = new byte[]{
-            0x00,
-            0x01
+            requestIdResponse[0],
+            requestIdResponse[1],
         };
 
         byte[] dataToSend = new byte[10];//container of data that will be sent to the card
@@ -644,27 +646,35 @@ public class Terminal extends Thread implements IObservable {
         }
 
         //Verify signature
-        handleSignature(publicKeyCard, 2, dataRec);
+        handleSignature(publicKeyCard, 4, dataRec);
 
-        //Todo: send the received message to the backend
+        //send the received message to the backend
 
+        // Messagecode (3) || Nonce || Card Id || Signed (Nonce || Card Id)
 
-        //Receive a message from the backend
-        byte[] nonceIncrementedSigned = new byte[2+500]; //Receive this from the backend
+        byte[] dataForBackend = new byte[2+dataRec.length];
+        dataForBackend[0] = 0x00;
+        dataForBackend[1] = 0x03;
+        Util.arrayCopy(dataRec, (short) 0, dataForBackend, (short) 2, (short) dataRec.length);
+
+        //Receive the reponse from the backend
+        byte[] backendResponse = backend.sendAndReceive(dataForBackend);
+
+        System.out.println("Decomm response backend: " + DatatypeConverter.printHexBinary(backendResponse));
+
         byte[] backendNonceIncremented = new byte[2];
-        Util.arrayCopy(nonceIncrementedSigned, (short) 0, backendNonceIncremented, (short) 0, (short) 2); //Copy the plaintext nonce of the backend
+        Util.arrayCopy(backendResponse, (short) 0, backendNonceIncremented, (short) 0, (short) 2); //Copy the plaintext nonce of the backend
 
-        //Check if nonce has been incremented
+        //Check if nonce has been incremented by 2 from the backend
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], backendNonceIncremented[0], backendNonceIncremented[1], 2)){
             System.err.println("Nonce has not been incremented");
             return;
         }
 
-        handleSignature(publicKeyBackend, 2, backendNonceIncremented);
+        handleSignature(publicKeyBackend, 4, backendResponse);
 
         //Forward this message to the card
-
-        hiAPDU = new CommandAPDU(CLASS, DECOMMISSIONING_CLEAR, 0, 0, nonceIncrementedSigned, nonceIncrementedSigned.length);
+        hiAPDU = new CommandAPDU(CLASS, DECOMMISSIONING_CLEAR, 0, 0, backendResponse, backendResponse.length);
         responseAPDU = ch.transmit(hiAPDU);
         System.out.println("DECOMMISSIONING_CLEAR: " + Integer.toHexString(responseAPDU.getSW()));
     }
@@ -684,12 +694,14 @@ public class Terminal extends Thread implements IObservable {
         System.arraycopy(signedNonce,0,combinedData,nonceBytes.length,signedNonce.length);
 
         System.out.println(firstShort);
-        System.out.println(DatatypeConverter.printHexBinary(combinedData));
+        System.out.println("Send in reloading Hi: " + DatatypeConverter.printHexBinary(combinedData));
         CommandAPDU hiAPDU = new CommandAPDU(CLASS, RELOADING_HI, 0, 0, combinedData, combinedData.length);
         ResponseAPDU responseAPDU = ch.transmit(hiAPDU);
         System.out.println("RELOADING_HI: " + Integer.toHexString(responseAPDU.getSW()));
 
         byte [] incrementedNonce = responseAPDU.getData();
+
+        System.out.println("Reponse reloading Hi: " + DatatypeConverter.printHexBinary(incrementedNonce));
         //Check if nonce is incremented
 
         if (!isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], incrementedNonce[0], incrementedNonce[1], 1)) {
@@ -704,23 +716,13 @@ public class Terminal extends Thread implements IObservable {
 
         //Forward this message to the backend
 
-        //MessageCode || Amount || Nonce || Card Id || Signature (Nonce || CardId)
+        //MessageCode || Tid || Amount || Signed(Tid || Amount) || Nonce || Card Id || Signature (Nonce || CardId)
 
-        //Todo, maybe sign the amount?
+        //Sign the amount
 
         short testAmount = 500;
-        byte[] requestForReload = new  byte[4+incrementedNonce.length];
+        byte[] requestForReload = getReloadRequest(testAmount, incrementedNonce);
 
-        requestForReload[0] = 0x00;
-        requestForReload[1] = 0x04;
-
-        byte[] amountByte = new byte[]{
-                (byte) (testAmount >> 8),
-                (byte) testAmount
-        };
-
-        Util.arrayCopy(amountByte, (short) 0, requestForReload, (short) 2, (short) 2);
-        Util.arrayCopy(incrementedNonce, (short) 0, requestForReload, (short) 4, (short) incrementedNonce.length);
 
         //Receive bytes from the backend
         byte[] backendResponse = backend.sendAndReceive(requestForReload);  //Returns Nonce || newbalance || signed
@@ -738,8 +740,7 @@ public class Terminal extends Thread implements IObservable {
         //Send to card (Nonce, Id, Amount) || signed
         byte[] incrementNonce = incrementNonceBy(backendResponse[0], backendResponse[1], 1);
         short balance = Util.makeShort(backendResponse[2], backendResponse[3]);
-        short amount = 90;
-        short newBalance = (short) (balance + amount);
+        short newBalance = (short) (balance + testAmount);
 
         byte [] dataToSend = new byte[]{
                 incrementNonce[0],  //Nonce received from backend incremented
@@ -760,6 +761,22 @@ public class Terminal extends Thread implements IObservable {
         responseAPDU = ch.transmit(hiAPDU);
         System.out.println("RELOADING_UPDATE: " + Integer.toHexString(responseAPDU.getSW()));
         System.out.println("Response: " + DatatypeConverter.printHexBinary(responseAPDU.getData()));
+    }
+
+    private byte[] getReloadRequest(short amount, byte[] signedCard){
+        byte[] requestForReload = new  byte[6+128+signedCard.length];
+
+        requestForReload[0] = 0x00;
+        requestForReload[1] = 0x04;
+        requestForReload[2] = terminalId[0];
+        requestForReload[3] = terminalId[1];
+        requestForReload[4] = (byte) (amount >> 8);
+        requestForReload[5] = (byte) amount;
+        byte[] amountSigned = sign(new byte[]{terminalId[0], terminalId[1], requestForReload[4], requestForReload[5]}); //Sign the terminal Id || Amount
+
+        Util.arrayCopy(amountSigned, (short) 0, requestForReload, (short) 6, (short) amountSigned.length);
+        Util.arrayCopy(signedCard, (short) 0, requestForReload, (short) (6+amountSigned.length), (short) signedCard.length);
+        return requestForReload;
     }
 
     /**
@@ -817,20 +834,7 @@ public class Terminal extends Thread implements IObservable {
         //Forward the request to the backend
 
         // Request the correct balance (ie. reloading with amount 0)
-
-        short testAmount = 0;
-        byte[] requestForReload = new  byte[4+incrementedNonce.length];
-
-        requestForReload[0] = 0x00;
-        requestForReload[1] = 0x04;
-
-        byte[] amountByte = new byte[]{
-                (byte) (testAmount >> 8),
-                (byte) testAmount
-        };
-
-        Util.arrayCopy(amountByte, (short) 0, requestForReload, (short) 2, (short) 2);
-        Util.arrayCopy(incrementedNonce, (short) 0, requestForReload, (short) 4, (short) incrementedNonce.length);
+        byte[] requestForReload = getReloadRequest((short) 0, incrementedNonce);
 
         //Receive bytes from the backend
         byte[] backendResponse = backend.sendAndReceive(requestForReload);  //Returns Nonce || newbalance || signed
@@ -847,7 +851,7 @@ public class Terminal extends Thread implements IObservable {
 
         nonceBytes = incrementNonceBy(backendResponse[0], backendResponse[1], 1);
 
-        short newBalance = (short) (receivedBalance - testAmount);
+        short newBalance = (short) (receivedBalance - creditAmount);
 
         byte[] dataToSend = null;
         byte instruction;
@@ -899,6 +903,20 @@ public class Terminal extends Thread implements IObservable {
 
             hiAPDU = new CommandAPDU(CLASS, instruction, 1, 0, dataTosendNoPINSigned, (short) dataTosendNoPINSigned.length);
             responseAPDU = ch.transmit(hiAPDU);
+
+            //Todo: Check if the pin is good
+            if (responseAPDU.getSW() == 27013){
+                //Pin is wrong
+                System.err.println("Wrong pin!");
+                return;
+            }else if (responseAPDU.getSW() == 0x6305){
+                //No more pin attempts
+                System.err.println("No more pin attempts");
+                return;
+            }else if (responseAPDU.getSW() == 0x6301){
+                System.err.println("PIN is required");
+                return;
+            }
         }else{
             //Todo: implement this on the card
 //            hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, bytesApdu, bytesApdu.length);
@@ -1044,7 +1062,7 @@ public class Terminal extends Thread implements IObservable {
     }
 
     public static void main(String[] args) {
-        Terminal terminal = new Terminal();
+        Terminal terminal = new Terminal(new BackEndCommunicator());
         //new Thread(Terminal).run();
     }
 
