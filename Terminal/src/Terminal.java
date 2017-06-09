@@ -1,13 +1,6 @@
-import Events.ErrorEvent;
-import Events.IObservable;
-import Events.UpdateLogsEvent;
-import com.sun.xml.internal.bind.v2.runtime.unmarshaller.ValuePropertyLoader;
-import javacard.framework.APDU;
 import javacard.framework.ISO7816;
 import javacard.framework.Util;
-import org.bouncycastle.jcajce.provider.asymmetric.rsa.BCRSAPublicKey;
 import org.bouncycastle.util.encoders.Hex;
-import org.bouncycastle.util.test.FixedSecureRandom;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
@@ -15,7 +8,6 @@ import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 import javax.smartcardio.*;
 import javax.xml.bind.DatatypeConverter;
-import javax.xml.crypto.Data;
 import java.math.BigInteger;
 import java.security.*;
 import java.security.interfaces.RSAKey;
@@ -25,14 +17,13 @@ import java.security.spec.InvalidKeySpecException;
 import java.security.spec.RSAPrivateKeySpec;
 import java.security.spec.RSAPublicKeySpec;
 import java.security.spec.X509EncodedKeySpec;
-import java.sql.DataTruncation;
 import java.util.*;
 
 
 /**
  * Created by Tomirio on 9-5-2017.
  */
-public class Terminal extends Thread implements IObservable {
+public class Terminal extends Thread {
 
     private static final String APPLET_AID = "a04041424344454610"; //01";
     private static final byte CLASS = (byte) 0xB0;
@@ -85,24 +76,6 @@ public class Terminal extends Thread implements IObservable {
         this.backend = be;
 
         this.start();
-    }
-
-    @Override
-    public synchronized void addObserver(Observer o) {
-        if (observers == null){
-            observers = new ArrayList<>();
-        }
-        observers.add(o);
-    }
-
-    @Override
-    public void update(Object event) {
-        if (observers == null)
-            return;
-
-        for (Observer ob : observers){
-            ob.update(null, event);
-        }
     }
 
     @Override
@@ -378,7 +351,6 @@ public class Terminal extends Thread implements IObservable {
 
         if (responseAPDU.getSW() == 0x6303){
             System.out.println("Card was blocked");
-            this.update(new ErrorEvent("Card is blocked. Aborting."));
             return;
         }
 
@@ -448,11 +420,8 @@ public class Terminal extends Thread implements IObservable {
         byte[] modulusBytes = new byte[modulusSize];
         byte[] exponentBytes = new byte[exponentSize];
 
-        Util.arrayCopy(publicKeyCardBytes, (short) 0, exponentBytes, (short) 0, exponentSize);
-        Util.arrayCopy(publicKeyCardBytes, exponentSize, modulusBytes, (short) 0, modulusSize);
-
-        BigInteger modulus = new BigInteger(modulusBytes);
-        BigInteger exponent = new BigInteger(exponentBytes);
+        Util.arrayCopy(publicKeyTerminalBytes, (short) 0, exponentBytes, (short) 0, exponentSize);
+        Util.arrayCopy(publicKeyTerminalBytes, exponentSize, modulusBytes, (short) 0, modulusSize);
 
         // Create private and public key specs
         publicKeyCard = (RSAPublicKey) keyFromEncoded(publicKeyCardBytes, 0);
@@ -462,8 +431,8 @@ public class Terminal extends Thread implements IObservable {
         ResponseAPDU responsePrivate;
 
         byte[] dataToSend = new byte[2 + publicKeyTerminalBytes.length];
-        dataToSend[0] = v[0];
-        dataToSend[1] = v[1];
+        byte[] nonceIncremented = incrementNonceBy(v[0], v[1], 1);
+        Util.arrayCopy(nonceIncremented, (short) 0, dataToSend, (short) 0, (short) 2);
         Util.arrayCopy(publicKeyTerminalBytes, (short) 0, dataToSend, (short) 2, (short) publicKeyTerminalBytes.length);
 
         System.out.println(Util.makeShort(dataToSend[0], dataToSend[1]));
@@ -615,7 +584,6 @@ public class Terminal extends Thread implements IObservable {
             capdu = new CommandAPDU(CLASS, PERSONALIZATION_NEW_PIN, (byte) 0, (byte) 0, pin);
             ResponseAPDU responsePrivate = ch.transmit(capdu);
             System.out.println("PERSONALIZATION_NEW_PIN: " + Integer.toHexString(responsePrivate.getSW()));
-            update(new UpdateLogsEvent(DatatypeConverter.printHexBinary(pin)));
             System.out.println("PIN "+ DatatypeConverter.printHexBinary(pin));
         } catch (Exception e) {
             e.printStackTrace();
