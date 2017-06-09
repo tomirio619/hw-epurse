@@ -598,6 +598,7 @@ public class Epurse extends Applet implements ISO7816 {
             if (pin.getTriesRemaining() <= 0x00){
                 ISOException.throwIt(SW_NO_MORE_PIN_ATTEMPTS);
             }
+
             if (!pin.check(pinBytes, (short) 0, PIN_LENGTH))
                 ISOException.throwIt(SW_CONDITIONS_NOT_SATISFIED);
 
@@ -605,7 +606,11 @@ public class Epurse extends Applet implements ISO7816 {
             Util.arrayCopy(transientBuffer, (short) 2, amount, (short) 0, (short) 2);
 
         }else if (headerBuffer[ISO7816.OFFSET_P1]==1){
-            pay(apdu);
+            if(pin.isValidated()) {
+                pay(apdu);
+            }else
+                ISOException.throwIt(SW_PIN_VERIFICATION_REQUIRED);
+
 
         }else ISOException.throwIt(SW_COMMAND_NOT_ALLOWED);
 
