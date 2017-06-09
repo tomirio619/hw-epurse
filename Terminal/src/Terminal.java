@@ -1,4 +1,6 @@
+import Events.ErrorEvent;
 import Events.IObservable;
+import Events.UpdateLogsEvent;
 import com.sun.xml.internal.bind.v2.runtime.unmarshaller.ValuePropertyLoader;
 import javacard.framework.APDU;
 import javacard.framework.ISO7816;
@@ -126,14 +128,14 @@ public class Terminal extends Thread implements IObservable {
                             System.out.println(DatatypeConverter.printHexBinary(selectApplet.getBytes()));
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
 
-                            personalizationFull();
+//                            personalizationFull();
 
                             testTerminalAuth();
 
-                            testReloading();
+                            testReloading((short) 500);
 
                             testCrediting();
-
+//
 //                            testDecommissioning();
 
                         } catch (Exception e) {
@@ -257,7 +259,7 @@ public class Terminal extends Thread implements IObservable {
     }
 
     // Send all step personalization
-    private void personalizationFull() throws CardException, NoSuchAlgorithmException {
+    public void personalizationFull() throws CardException, NoSuchAlgorithmException {
         System.out.println("-----Test Personalization-----");
         testSendBackendKey();
         testPersonalizationHi();
@@ -370,6 +372,12 @@ public class Terminal extends Thread implements IObservable {
         System.out.println("VERIFICATION_HI: " + Integer.toHexString(responseAPDU.getSW()));
 
         byte [] ca = responseAPDU.getData(); // Data Ca{Ca}SKC
+
+        if (responseAPDU.getSW() == 0x6303){
+            System.out.println("Card was blocked");
+            this.update(new ErrorEvent("Card is blocked. Aborting."));
+            return;
+        }
 
         if (! isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], ca[0], ca[1], 1)){
             System.err.println("Nonce not incremented");
@@ -607,14 +615,14 @@ public class Terminal extends Thread implements IObservable {
         //Todo: generate PIN at random
         Random random = new Random();
 
-//        byte[] pin = {(byte) random.nextInt(9), (byte) random.nextInt(9), (byte) random.nextInt(9), (byte) random.nextInt(9)};
-        byte[] pin = {1, 2, 3, 4};
+        byte[] pin = {(byte) random.nextInt(9), (byte) random.nextInt(9), (byte) random.nextInt(9), (byte) random.nextInt(9)};
+//        byte[] pin = {1, 2, 3, 4};
         try {
             CommandAPDU capdu;
             capdu = new CommandAPDU(CLASS, PERSONALIZATION_NEW_PIN, (byte) 0, (byte) 0, pin);
             ResponseAPDU responsePrivate = ch.transmit(capdu);
             System.out.println("PERSONALIZATION_NEW_PIN: " + Integer.toHexString(responsePrivate.getSW()));
-
+            update(new UpdateLogsEvent(DatatypeConverter.printHexBinary(pin)));
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -679,7 +687,7 @@ public class Terminal extends Thread implements IObservable {
         System.out.println("DECOMMISSIONING_CLEAR: " + Integer.toHexString(responseAPDU.getSW()));
     }
 
-    private void testReloading() throws CardException {
+    public void testReloading(short amount) throws CardException {
         System.out.println("-----Test Reloading-----");
 
         byte [] nonceBytes = new byte[2];
@@ -720,9 +728,7 @@ public class Terminal extends Thread implements IObservable {
 
         //Sign the amount
 
-        short testAmount = 500;
-        byte[] requestForReload = getReloadRequest(testAmount, incrementedNonce);
-
+        byte[] requestForReload = getReloadRequest(amount, incrementedNonce);
 
         //Receive bytes from the backend
         byte[] backendResponse = backend.sendAndReceive(requestForReload);  //Returns Nonce || newbalance || signed
@@ -740,7 +746,7 @@ public class Terminal extends Thread implements IObservable {
         //Send to card (Nonce, Id, Amount) || signed
         byte[] incrementNonce = incrementNonceBy(backendResponse[0], backendResponse[1], 1);
         short balance = Util.makeShort(backendResponse[2], backendResponse[3]);
-        short newBalance = (short) (balance + testAmount);
+        short newBalance = (short) (balance + amount);
 
         byte [] dataToSend = new byte[]{
                 incrementNonce[0],  //Nonce received from backend incremented
@@ -842,7 +848,7 @@ public class Terminal extends Thread implements IObservable {
         //Receive the correct balance from the backend
         short receivedBalance = Util.makeShort(backendResponse[2], backendResponse[3]);
         //Todo make credit amount non-fixed
-        short creditAmount = 21;
+        short creditAmount = 12;
 
         if(receivedBalance-creditAmount< 0){
             System.out.println("Error negative balance");
@@ -880,12 +886,17 @@ public class Terminal extends Thread implements IObservable {
         }else{
             instruction = CREDIT_COMMIT_NO_PIN;
 
-            dataToSend = new byte[]{
+            byte[] data = new byte[]{
                 nonceBytes[0],
                 nonceBytes[1],
                 (byte) (creditAmount >> 8),
                 (byte) creditAmount
             };
+
+            byte[] dataToSendSigned = sign(data);
+            dataToSend = new byte[4 + dataToSendSigned.length];
+            Util.arrayCopy(dataToSend, (short) 0, dataToSend, (short) 0, (short) 4);
+            Util.arrayCopy(dataToSendSigned, (short) 0, dataToSend, (short) 4, (short) 128);
         }
 
 
@@ -896,7 +907,7 @@ public class Terminal extends Thread implements IObservable {
             hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, dataToSend, dataToSend.length);
             responseAPDU = ch.transmit(hiAPDU);
 
-            //Second APDU has the signed (nonce, amount, balance).
+            //Second APDU has the signed (nonce, amount).
             byte[] dataToSendNoPIN = new byte[4];
             Util.arrayCopy(dataToSend, (short) 0, dataToSendNoPIN, (short) 0, (short) 4);
             byte[] dataTosendNoPINSigned = sign(dataToSendNoPIN);
@@ -919,8 +930,8 @@ public class Terminal extends Thread implements IObservable {
             }
         }else{
             //Todo: implement this on the card
-//            hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, bytesApdu, bytesApdu.length);
-//            responseAPDU = ch.transmit(hiAPDU);
+            hiAPDU = new CommandAPDU(CLASS, instruction, 0, 0, dataToSend, dataToSend.length);
+            responseAPDU = ch.transmit(hiAPDU);
         }
 
         System.out.println("CREDITING_UPDATE: " + Integer.toHexString(responseAPDU.getSW()));

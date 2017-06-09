@@ -1,9 +1,11 @@
 import Events.CardConnectedEvent;
 import Events.ErrorEvent;
 import Events.UpdateLogsEvent;
+import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.control.*;
+import sun.awt.PlatformFont;
 
 import javax.smartcardio.CardException;
 import java.net.URL;
@@ -31,19 +33,27 @@ public class TerminalController implements Initializable, Observer {
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         System.out.println("Am I first?");
-        terminal = new Terminal(new BackEndCommunicator());
+        BackEndCommunicator be = new BackEndCommunicator();
+        be.addObserver(this);
+        terminal = new Terminal(be);
+        terminal.addObserver(this);
 
-        new Timer().schedule(new TimerTask() {
-            @Override
-            public void run() {
-                updateDebug("Hallo");
-            }
-        }, 0, 1000);
+//        new Timer().schedule(new TimerTask() {
+//            @Override
+//            public void run() {
+//                updateDebug("Hallo");
+//            }
+//        }, 0, 1000);
     }
 
     @FXML
     private void startPersonalization(){
-        System.out.println("Hallo");
+        try {
+            terminal.personalizationFull();
+        } catch (CardException | NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+
     }
 
     private boolean isADouble(TextField field){
@@ -64,7 +74,11 @@ public class TerminalController implements Initializable, Observer {
     @FXML
     private void startReload(){
         if (isADouble(reloadAmount)){
-            System.out.println("Reload");
+            try {
+                terminal.testReloading(Short.parseShort(reloadAmount.getText()));
+            } catch (CardException e) {
+                e.printStackTrace();
+            }
         }else{
             System.out.println("No!");
         }
@@ -92,19 +106,26 @@ public class TerminalController implements Initializable, Observer {
 
     @Override
     public void update(Observable o, Object arg) {
-        if (arg instanceof UpdateLogsEvent){
-            updateDebug(((UpdateLogsEvent) arg).getLog());
-        }
+        Platform.runLater(new Runnable() {
+            @Override
+            public void run() {
+                if (arg instanceof UpdateLogsEvent){
+                    updateDebug(((UpdateLogsEvent) arg).getLog());
+                }
 
-        if (arg instanceof CardConnectedEvent){
-            txtConnection.setText(((CardConnectedEvent) arg).getCardName());
-        }
+                if (arg instanceof CardConnectedEvent){
+                    txtConnection.setText(((CardConnectedEvent) arg).getCardName());
+                }
 
-        if (arg instanceof ErrorEvent){
-            Alert alert = new Alert(Alert.AlertType.ERROR);
-            alert.setHeaderText("Error");
-            alert.setContentText(((ErrorEvent) arg).getErrorMessage());
-            alert.showAndWait();
-        }
+                if (arg instanceof ErrorEvent){
+                    Alert alert = new Alert(Alert.AlertType.ERROR);
+                    alert.setHeaderText("Error");
+                    alert.setContentText(((ErrorEvent) arg).getErrorMessage());
+                    alert.showAndWait();
+                    System.exit(0);
+                }
+            }
+        });
+
     }
 }
