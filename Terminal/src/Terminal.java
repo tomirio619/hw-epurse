@@ -129,7 +129,7 @@ public class Terminal extends Thread implements IObservable {
                             System.out.println(DatatypeConverter.printHexBinary(selectApplet.getBytes()));
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
 
-//                            personalizationFull();
+                            personalizationFull();
 
                             testTerminalAuth();
 
@@ -215,30 +215,9 @@ public class Terminal extends Thread implements IObservable {
         return data;
     }
 
-    private RSAPublicKey loadCardKeys(){
-        //First generate test terminal keypair
-        BigInteger modulus = new BigInteger(CardKeys.modulus, 16);
-        BigInteger exponent = new BigInteger(CardKeys.privateExponent, 16);
-
-        // Create private  key specs
-        RSAPrivateKeySpec privateKeySpec = new RSAPrivateKeySpec(modulus, exponent);
-
-        // Create a key factory
-        KeyFactory factory = null;
-        RSAPrivateKey privateK = null;
-        RSAPublicKey publicKey;
-
-        try {
-            factory = KeyFactory.getInstance("RSA");
-            // Create the RSA private and public keys
-            privateKeyCard = (RSAPrivateKey) factory.generatePrivate(privateKeySpec);
-        } catch (InvalidKeySpecException | NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        }
-        return (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
-
-    }
-
+    /**
+     * Loads the terminal key
+     */
     private void loadTerminalKeys() {
         //First generate test terminal keypair
         BigInteger modulus = new BigInteger(TerminalKeys.modulus, 16);
@@ -284,8 +263,11 @@ public class Terminal extends Thread implements IObservable {
         return old + incrementedBy == newNonce;
     }
 
-
-
+    /**
+     * Sign a byte array with the key of the terminal
+     * @param textToSign
+     * @return
+     */
     private byte[] sign(byte[] textToSign){
         Signature signature = null;
         try {
@@ -300,6 +282,12 @@ public class Terminal extends Thread implements IObservable {
         return null;
     }
 
+    /**
+     * Sign a byte array with a specified RSA signing key
+     * @param signingKey
+     * @param textToSign
+     * @return
+     */
     private byte[] sign(RSAPrivateKey signingKey, byte[] textToSign){
         Signature signature = null;
         try {
@@ -314,6 +302,13 @@ public class Terminal extends Thread implements IObservable {
         return null;
     }
 
+    /**
+     * Verifies a signature given a public key, plaintext and signature byte array
+     * @param publicKey
+     * @param plainText
+     * @param signedBytes
+     * @return
+     */
     private boolean verify(RSAPublicKey publicKey, byte[] plainText, byte[] signedBytes){
         Signature signature = null;
         try {
@@ -349,6 +344,13 @@ public class Terminal extends Thread implements IObservable {
         }
     }
 
+    /**
+     * Receives two bytes and an incrementation value and returns the incremented byte array
+     * @param n1
+     * @param n2
+     * @param incrementBy
+     * @return
+     */
     private byte[] incrementNonceBy(byte n1, byte n2, int incrementBy){
         short old = Util.makeShort(n1, n2);
         old += incrementBy;
@@ -477,6 +479,10 @@ public class Terminal extends Thread implements IObservable {
         System.out.println("VERIFICATION_S: " + Integer.toHexString(responsePrivate.getSW()));
     }
 
+    /**
+     * Send the key of the backend to the card, so that it is possible for the card to verify the signatures of the backend
+     * @throws CardException
+     */
     public void testSendBackendKey() throws CardException {
         // Send BE key for verify signatures(this will be done in the personalization)
         byte[] exponentBytesBE = getBytes(publicKeyBackend.getPublicExponent());
@@ -497,26 +503,6 @@ public class Terminal extends Thread implements IObservable {
 
     public void testPersonalizationHi() throws CardException, NoSuchAlgorithmException {
         //generate fresh card keys
-
-//        //Get keys from CardKeys.java (keys stored in the database)
-//        RSAPrivateKey cardPrivateKey = null;
-//        BigInteger modulusBig = new BigInteger(CardKeys.modulus, 16);
-//        BigInteger exponentBig = new BigInteger(CardKeys.privateExponent, 16);
-//        // Create private  key specs
-//        RSAPrivateKeySpec privateKeySpec = new RSAPrivateKeySpec(modulusBig, exponentBig);
-//        // Create a key factory
-//        KeyFactory factory = null;
-//        try {
-//            factory = KeyFactory.getInstance("RSA");
-//            // Create the RSA private and public keys
-//            cardPrivateKey = (RSAPrivateKey) factory.generatePrivate(privateKeySpec);
-//        } catch (InvalidKeySpecException | NoSuchAlgorithmException e) {
-//            e.printStackTrace();
-//        }
-//
-//        publicKeyCard = (RSAPublicKey) keyFromEncoded(hexStringToByteArray(CardKeys.publicEncoded), 0);
-//
-//        x
         System.out.println("Generating fresh keys");
         KeyPairGenerator generator = null;
 
@@ -555,6 +541,10 @@ public class Terminal extends Thread implements IObservable {
         System.out.println("PERSONALIZATION_HI public exponent: " + Integer.toHexString(responsePrivate.getSW()));
     }
 
+    /**
+     * Create an creation and expiration date
+     * @throws CardException
+     */
     private void testPesonalizationDates() throws CardException {
 
         // Get current date unix seconds
@@ -612,12 +602,14 @@ public class Terminal extends Thread implements IObservable {
         System.out.println("PERSONALIZATION_DATES: " + Integer.toHexString(responsePrivate.getSW()));
     }
 
+    /**
+     * Generates a random PIN
+     */
     private void testPin() {
-        //Todo: generate PIN at random
+        //Generate PIN at random
         Random random = new Random();
 
         byte[] pin = {(byte) random.nextInt(9), (byte) random.nextInt(9), (byte) random.nextInt(9), (byte) random.nextInt(9)};
-//        byte[] pin = {1, 2, 3, 4};
         try {
             CommandAPDU capdu;
             capdu = new CommandAPDU(CLASS, PERSONALIZATION_NEW_PIN, (byte) 0, (byte) 0, pin);
@@ -630,7 +622,10 @@ public class Terminal extends Thread implements IObservable {
         }
     }
 
-
+    /**
+     * Decommisions a card
+     * @throws CardException
+     */
     private void testDecommissioning() throws CardException {
         System.out.println("-----Test Decommissioning-----");
 
@@ -689,6 +684,11 @@ public class Terminal extends Thread implements IObservable {
         System.out.println("DECOMMISSIONING_CLEAR: " + Integer.toHexString(responseAPDU.getSW()));
     }
 
+    /**
+     * Test the reloading
+     * @param amount
+     * @throws CardException
+     */
     public void testReloading(short amount) throws CardException {
         System.out.println("-----Test Reloading-----");
 
@@ -711,7 +711,7 @@ public class Terminal extends Thread implements IObservable {
 
         byte [] incrementedNonce = responseAPDU.getData();
 
-        System.out.println("Reponse reloading Hi: " + DatatypeConverter.printHexBinary(incrementedNonce));
+        System.out.println("Response reloading Hi: " + DatatypeConverter.printHexBinary(incrementedNonce));
         //Check if nonce is incremented
 
         if (!isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], incrementedNonce[0], incrementedNonce[1], 1)) {
@@ -771,6 +771,12 @@ public class Terminal extends Thread implements IObservable {
         System.out.println("Response: " + DatatypeConverter.printHexBinary(responseAPDU.getData()));
     }
 
+    /**
+     * Create a request for the backend indicating to return the balance of a given card
+     * @param amount
+     * @param signedCard
+     * @return
+     */
     private byte[] getReloadRequest(short amount, byte[] signedCard){
         byte[] requestForReload = new  byte[6+128+signedCard.length];
 
@@ -805,6 +811,10 @@ public class Terminal extends Thread implements IObservable {
         return null;
     }
 
+    /**
+     * Test the crediting of a card
+     * @throws CardException
+     */
     private void testCrediting() throws CardException {
 
         System.out.println("-----Test Crediting-----");
@@ -999,81 +1009,6 @@ public class Terminal extends Thread implements IObservable {
             System.arraycopy(tmp, 1, data, 0, tmp.length - 1);
         }
         return data;
-    }
-
-    private void printDifferenceInArrays(byte[] a, byte[] b){
-        System.out.println("Length of a " + a.length);
-        System.out.println("Length of b " + b.length);
-        for (int i = 0  ; i < a.length ; i++){
-            if (a[i] != b[i]){
-                System.out.println("Array a at "+ i + " different with b at " + i + " value a " + a[i] + " value b " + b[i]  );
-            }
-        }
-    }
-
-    private void testSignatureRSA() {
-
-        System.out.println("-----Test signature RSA-----");
-
-
-        RSAPublicKey publickey = null;
-
-        RSAPrivateKey privatekey = null;
-
-        /* Generate keypair. */
-        try {
-            System.out.println("Generating keys...");
-            KeyPairGenerator generator = null;
-
-            generator = KeyPairGenerator.getInstance("RSA");
-
-            generator.initialize(1024);
-            java.security.KeyPair keypair = generator.generateKeyPair();
-            publickey = (RSAPublicKey) keypair.getPublic();
-            privatekey = (RSAPrivateKey) keypair.getPrivate();
-
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        }
-
-        /* Send private key. */
-        try {
-            byte[] modulus = getBytes(privatekey.getModulus());
-
-            CommandAPDU capdu;
-            capdu = new CommandAPDU(CLASS, SEND_KEYPAIR_RSA, (byte) 0, (byte) 0, modulus);
-            ResponseAPDU responsePrivate = ch.transmit(capdu);
-            System.out.println("SEND_KEYPAIR modulus: " + Integer.toHexString(responsePrivate.getSW()));
-
-
-            byte[] exponent = getBytes(privatekey.getPrivateExponent());
-            capdu = new CommandAPDU(CLASS, SEND_KEYPAIR_RSA, (byte) 1, (byte) 0, exponent);
-            responsePrivate = ch.transmit(capdu);
-            System.out.println("SEND_KEYPAIR exponent: " + Integer.toHexString(responsePrivate.getSW()));
-
-            capdu = new CommandAPDU(CLASS, SEND_KEYPAIR, (byte) 0, (byte) 0, 0);
-            responsePrivate = ch.transmit(capdu);
-            System.out.println("SIGNING Request: " + Integer.toHexString(responsePrivate.getSW()));
-
-            byte[] data = {(byte) 42};
-
-            try {
-                byte[] signedDataTerminal = responsePrivate.getData();
-                Signature signature = Signature.getInstance("SHA1withRSA", "BC");
-                signature.initVerify(publickey);
-                signature.update(signedDataTerminal[0]);
-                boolean ifVerified = signature.verify(signedDataTerminal, (short) 1, (short) 128);
-                System.out.println("Verification " +ifVerified);
-            }catch (Exception e){
-                e.printStackTrace();
-            }
-
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-
     }
 
     public static void main(String[] args) {
