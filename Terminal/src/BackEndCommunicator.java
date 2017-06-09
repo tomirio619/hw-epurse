@@ -1,6 +1,4 @@
-import Events.ErrorEvent;
-import Events.IObservable;
-import javafx.scene.control.Alert;
+
 
 import javax.xml.bind.DatatypeConverter;
 import java.io.*;
@@ -14,30 +12,11 @@ import java.util.Observer;
 /**
  * Created by appie on 4-6-2017.
  */
-public class BackEndCommunicator extends Thread implements IObservable{
+public class BackEndCommunicator extends Thread {
 
     private Socket socket;
-    private List<Observer> observers;
 
     public BackEndCommunicator() {
-    }
-
-    @Override
-    public synchronized void addObserver(Observer o) {
-        if (observers == null){
-            observers = new ArrayList<>();
-        }
-        observers.add(o);
-    }
-
-    @Override
-    public void update(Object event) {
-        if (observers == null){
-            return;
-        }
-        for (Observer o : observers){
-            o.update(null, event);
-        }
     }
 
     /**
@@ -71,10 +50,9 @@ public class BackEndCommunicator extends Thread implements IObservable{
                     switch (errorCode){
                         case 3:
                             //Signature is not valid
-                            this.update(new ErrorEvent("Signature is not valid"));
+                            System.out.println("Signature not valid");
                             break;
                     }
-//                    this.update(new ErrorEvent());
                     break;
                 }
 
