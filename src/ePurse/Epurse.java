@@ -272,11 +272,11 @@ public class Epurse extends Applet implements ISO7816 {
         if (status == STATE_RAW) {
             switch (headerBuffer[OFFSET_INS]) {
 
+                // Personalization APDUs:
                 case PERSONALIZATION_BACKEND_KEY: {
                     saveBackendKey(apdu);
                     break;
                 }
-                // Personalization APDUs:
                 case PERSONALIZATION_HI:
                     processPersonalizationHi(apdu);
                     break;
@@ -292,6 +292,7 @@ public class Epurse extends Applet implements ISO7816 {
             }
 
         } else if (status == STATE_PERSONALIZED) {
+
             // Check whether the terminal auth is verified
             if (sessionStatus[0] == TERMINAL_NO_AUTH) {
                 switch (headerBuffer[OFFSET_INS]) {
@@ -308,34 +309,19 @@ public class Epurse extends Applet implements ISO7816 {
                         sessionStatus[0]=TERMINAL_AUTH;
                         break;
                     default:
-                        //ISOException.throwIt(headerBuffer[OFFSET_INS]);
-                        throw new ISOException((short) 99);
+                        throw new ISOException(SW_INS_NOT_SUPPORTED);
+
                 }
 
             } else if (sessionStatus[0] == TERMINAL_AUTH) {
                 // Handle instructions
                 switch (headerBuffer[OFFSET_INS]) {
-                    //Init phase:
-                    case KEYPAIR_PRIVATE_RSA: {
-                        insKeypairPrivateRSA(apdu);
-                        break;
-                    }
-                    case KEYPAIR_PRIVATE: {
-                        insKeyPairPrivate(apdu);
-                        break;
-                    }
-                    case DECRYPTION_KEY: {
-                        insDecryptionKey(apdu);
-                        break;
-                        //Verification APDUs:
-                    }
 
                     //Decommissioning APDUs:
                     case DECOMMISSIONING_HI:
                         sendHiMessage(apdu);
                         break;
                     case DECOMMISSIONING_CLEAR:
-                        //TODO check nonces
                         processDecommissioningClear(apdu);
                         break;
 
@@ -368,19 +354,6 @@ public class Epurse extends Applet implements ISO7816 {
 
 
 
-    /**
-     * @param apdu
-     */
-    private void insKeypairPrivateRSA(APDU apdu) {
-        boolean isModulus = headerBuffer[OFFSET_P1] == (byte) 0;
-        if (isModulus) {
-            readBuffer(apdu, transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
-            privKey.setModulus(transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
-        } else {
-            readBuffer(apdu, transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
-            privKey.setExponent(transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
-        }
-    }
 
     private void processVerificationHi(APDU apdu) {
         //Increment the received number
@@ -455,17 +428,6 @@ public class Epurse extends Applet implements ISO7816 {
     }
 
     /**
-     * @param apdu
-     */
-    private void insKeyPairPrivate(APDU apdu) {
-        readBuffer(apdu, transientBuffer, (short) 0 , (short) (128+1));
-        boolean verified = verify(transientBuffer, (short) 0, (short) 1, transientBuffer, (short) 1, (short) 128, backEndKey);
-
-        if (verified) ISOException.throwIt((short) 99);
-        ISOException.throwIt((short) 111);
-    }
-
-    /**
      * Store the public key of the Backend within the personalization phase
      * @param apdu
      */
@@ -478,14 +440,6 @@ public class Epurse extends Applet implements ISO7816 {
 
         backEndKey.setExponent(transientBuffer, (short) 0, exponentLength);
         backEndKey.setModulus(transientBuffer, exponentLength, modulusLength);
-
-       /* if(headerBuffer[OFFSET_P1]==(byte)0){
-            backEndKey.setModulus(transientBuffer, (short) 0, datalength);
-
-        }else if(headerBuffer[OFFSET_P1]==(byte)1){
-            backEndKey.setExponent(transientBuffer, (short) 0, datalength);
-
-        }*/
 
     }
 
@@ -520,6 +474,11 @@ public class Epurse extends Applet implements ISO7816 {
 
     }
 
+    /**
+     * Read apdu buffer that contains the public and the private keys of the card. This keys are split it in 4 apdus
+     *
+     * @param apdu
+     */
     private void processPersonalizationHi(APDU apdu) {
 
         byte keyValue = headerBuffer[OFFSET_P1];
@@ -556,16 +515,6 @@ public class Epurse extends Applet implements ISO7816 {
             readBuffer(apdu, transientBuffer, (short) 0, headerBuffer[OFFSET_LC]);
         pin.update(transientBuffer, (short) 0, (byte) 4);
 
-    }
-
-    private void checkPIN(APDU apdu) {
-        readBuffer(apdu, transientBuffer, (short) 0, (short) (headerBuffer[OFFSET_LC] & 0x00FF));
-        if (pin.getTriesRemaining() <= 0x00){
-            ISOException.throwIt(SW_NO_MORE_PIN_ATTEMPTS);
-        }
-
-        if (!pin.check(transientBuffer, (short) 6, PIN_LENGTH))
-            ISOException.throwIt(SW_VERIFICATION_FAILED);
     }
 
     private void processCommitPaymentPIN(APDU apdu){
@@ -732,20 +681,6 @@ public class Epurse extends Applet implements ISO7816 {
         Util.arrayCopy(transientBuffer, (short) (NONCE_LENGTH+ID_LENGTH), balance, (short)0, AMOUNT_LENGTH);
     }
 
-
-    /**
-     *
-     * @param apdu
-     */
-    private void insDecryptionKey(APDU apdu) {
-        short datalength = (short) headerBuffer[OFFSET_LC];
-        Util.arrayCopy(apdu.getBuffer(), OFFSET_CDATA, transientBuffer, (short) 0, datalength);
-        short exponentLength = headerBuffer[OFFSET_P1];
-        short modulusLength = headerBuffer[OFFSET_P2];
-
-        //decryptionKey.setExponent(transientBuffer, (short) 0, exponentLength);
-        //decryptionKey.setModulus(transientBuffer, (short) (exponentLength + 1), modulusLength);
-    }
 
     /**
      * Read apdu buffer and store into a different array
