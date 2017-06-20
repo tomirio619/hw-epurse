@@ -17,6 +17,7 @@ import java.security.spec.InvalidKeySpecException;
 import java.security.spec.RSAPrivateKeySpec;
 import java.security.spec.RSAPublicKeySpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.sql.DataTruncation;
 import java.util.List;
 import java.util.Observer;
 import java.util.Random;
@@ -110,15 +111,44 @@ public class Terminal extends Thread {
                             System.out.println(DatatypeConverter.printHexBinary(selectApplet.getBytes()));
                             System.out.println(DatatypeConverter.printHexBinary(response.getBytes()));
 
-//                            personalizationFull();
+                            System.out.println("Make a choice: ");
+                            System.out.println("0. Personalize");
+                            System.out.println("1. Reloading");
+                            System.out.println("2. Crediting");
+                            System.out.println("3. Decommissioning");
 
-                            testTerminalAuth();
+                            Scanner scanner = new Scanner(System.in);
+                            int choice = scanner.nextInt();
 
-                            testReloading((short) 500);
+                            switch (choice) {
+                                case 0:
+                                    personalizationFull();
+                                    break;
+                                case 1:
+                                    testTerminalAuth();
+                                    System.out.println("Enter reloading amount ...");
+                                    scanner = new Scanner(System.in);
+                                    short balance = scanner.nextShort();
+                                    testReloading(balance);
+                                    break;
+                                case 2:
+                                    testTerminalAuth();
+                                    testCrediting();
+                                    break;
+                                case 3:
+                                    testTerminalAuth();
+                                    testDecommissioning();
+                                    break;
 
-                            testCrediting();
+                            }
+
+//                            testTerminalAuth();
+
+//                            testReloading((short) 500);
+
+//                            testCrediting();
 //
-                            testDecommissioning();
+//                            testDecommissioning();
 
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -365,6 +395,8 @@ public class Terminal extends Thread {
             System.out.println("Card was blocked");
             return;
         }
+
+        System.out.println("Received bytes " + DatatypeConverter.printHexBinary(ca));
 
         if (!isNonceIncrementedBy(nonceBytes[0], nonceBytes[1], ca[0], ca[1], 1)) {
             System.err.println("Nonce not incremented");
@@ -846,8 +878,10 @@ public class Terminal extends Thread {
 
         //Receive the correct balance from the backend
         short receivedBalance = Util.makeShort(backendResponse[2], backendResponse[3]);
-        //Todo make credit amount non-fixed
-        short creditAmount = 5;
+
+        System.out.println("Enter crediting amount...");
+        Scanner scanner = new Scanner(System.in);
+        short creditAmount = scanner.nextShort();
 
         if (receivedBalance - creditAmount < 0) {
             System.out.println("Error negative balance");
@@ -862,7 +896,7 @@ public class Terminal extends Thread {
         byte instruction;
 
         if (creditAmount > 20) {
-            Scanner scanner = new Scanner(System.in);
+            scanner = new Scanner(System.in);
             byte[] pinArray = new byte[4];
             System.out.println("Enter your PIN:");
             String pin = scanner.next();

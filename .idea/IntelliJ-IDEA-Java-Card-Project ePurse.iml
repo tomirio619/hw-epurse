@@ -21,6 +21,5 @@
     </orderEntry>
     <orderEntry type="module" module-name="Terminal" />
     <orderEntry type="module" module-name="Backend" />
-    <orderEntry type="library" name="bcprov-jdk15on-156" level="project" />
   </component>
 </module>
